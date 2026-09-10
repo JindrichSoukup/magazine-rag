@@ -1,0 +1,25 @@
+# --- generovaná data (regenerovatelná z PDF, nepatří do repozitáře) --------
+output/
+chroma_db/
+*.npy
+*.jsonl
+
+# --- zdrojová PDF a odvozené plné texty -----------------------------------
+# Archiv Živy je autorsky chráněný (Academia / AV ČR) - do repozitáře nepatří
+# ani PDF, ani z nich vytažený plný text. Cesta ke vstupům se předává
+# přes --input, viz README.
+data/
+pdf/
+*.pdf
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# --- IDE ------------------------------------------------------------------
+.spyproject/
+.idea/
+.vscode/

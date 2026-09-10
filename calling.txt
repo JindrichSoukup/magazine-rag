@@ -1,0 +1,14 @@
+python run_all.py --input C:\Users\Jindrich\Downloads\ziva\dily --output ./output
+
+python build_embeddings.py --input output/ziva_embedding_chunks.jsonl --output-dir output --model intfloat/multilingual-e5-base
+
+python check_embeddings.py --chunks output/ziva_embedding_chunks.jsonl --vectors output/ziva_embeddings__intfloat__multilingual-e5-base.npy --ids output/ziva_embeddings__intfloat__multilingual-e5-base_ids.json
+
+python build_chroma.py --chunks output/ziva_embedding_chunks.jsonl --vectors output/ziva_embeddings__intfloat__multilingual-e5-base.npy --ids output/ziva_embeddings__intfloat__multilingual-e5-base_ids.json --db-dir ./chroma_db --collection ziva --overwrite
+
+python query_chroma.py --db-dir ./chroma_db --collection ziva --model intfloat/multilingual-e5-base
+
+python assemble_context.py --db-dir ./chroma_db --collection ziva --model intfloat/multilingual-e5-base --chunks output/ziva_embedding_chunks.jsonl --corpus output/ziva_corpus.json
+
+# Aktuálně
+python diag_groups.py output/2023-1/blocks.json output/2023-1/toc.json output/2023-1/page_map.json
