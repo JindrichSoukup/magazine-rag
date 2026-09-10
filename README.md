@@ -17,6 +17,35 @@ zdroje](#profil-zdroje).
 
 ---
 
+## Dvě fáze, a ta druhá je pointa
+
+Projekt vznikl ve dvou oddělených etapách a každá učila něco jiného.
+
+**Nejdřív ručně, vrstvu po vrstvě**, aby bylo vidět, jaká rozhodnutí
+v takovém systému vlastně padají — včetně těch, která se udělají sama
+tichou výchozí hodnotou, když si jich člověk nevšimne. Výstupem téhle fáze
+nejsou jen skripty, ale dva texty, které dávají smysl i bez zbytku repozitáře:
+
+- [**Přehled rozhodnutí podle vrstvy**](docs/rag-decision-checklist.md) —
+  deset vrstev RAG systému a v každé seznam otázek, které se řeší.
+  Záměrně popisuje *co se rozhoduje*, ne jak rozhodnout; platí to na
+  libovolný RAG projekt, ne jen na tenhle.
+- [**RAG: build vs. buy**](docs/rag-build-vs-buy.md) — co si z ručního
+  stavění odnést, když podobnou věc někdo řídí ve větší organizaci.
+  Hlavní závěr: build vs. buy není jedna otázka, je to otázka **po
+  vrstvách**, a nejdražší práce je ta, která v demech vendorů není vidět.
+
+**Pak zobecnění**: z věci vyladěné na jeden časopis udělat systém
+s vyměnitelnými profily zdroje a ověřit to nasazením na druhý, nesouvisející
+časopis. Přenos je jediný poctivý test zobecnění a taky se to potvrdilo —
+vyplavalo pět chyb, které na prvním časopise nebyly vidět, a **ani jedna
+z nich nespadla**. Pipeline pokaždé doběhla a vypsala spokojený souhrn.
+
+Průběh obou fází, včetně toho, co se rozhodlo špatně, je v [deníku
+projektu](docs/project-log.md).
+
+---
+
 ## Proč to není `PyPDFLoader` + `RecursiveCharacterTextSplitter`
 
 Protože to na časopisecké sazbě nefunguje. Zajímavá část tohoto projektu
