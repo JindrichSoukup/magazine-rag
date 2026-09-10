@@ -1,8 +1,6 @@
-"""
-Stage 1: rozparsuj jedno PDF čísla Živy na textové bloky -> ziva_blocks.json
+"""Fáze 1: rozparsuj jedno PDF čísla časopisu na textové bloky -> blocks.json
 
-Tohle je skript, který dřív dělal ziva_blocks.json (rekonstruovaný zpětně
-z výstupu, protože originál se ztratil). Princip:
+Princip:
 
   1. fitz (PyMuPDF) rozdělí každou stránku na "raw" bloky podle toho, jak je
      PDF interně poskládané (typicky = jeden textový rámeček v InDesignu).
@@ -18,21 +16,28 @@ z výstupu, protože originál se ztratil). Princip:
      (je to neškodné, jen to odpovídá tomu, jak PDF bloky reálně šly za
      sebou na stránce).
   4. Každému výslednému bloku přiřadíme typ (title/heading/other/body/
-     caption/annotation) podle použitého fontu, velikosti písma a (jen pro
-     annotation) tvaru textu - to je čistě heuristika ušitá na layout Živy,
-     uvidíte v classify() níž. "annotation" jsou panelové značky/měřítka
-     nalepené přímo na obrázek (a/b/c, 1/2/3, "1 cm") - NE popisky obrázku.
+     caption/annotation). Tohle je jediný krok navázaný na konkrétní sazbu
+     a je celý vytažený do profilu zdroje - viz `magrag/profiles/`
+     a `magrag/typography.py`.
 
 Použití:
-    python extract_blocks.py ziva-2014-6.pdf ziva_blocks.json
+    python -m magrag.extract_blocks --profile ziva vstup.pdf blocks.json
 """
+import argparse
 import json
 import re
-import sys
 from collections import Counter
 from pathlib import Path
 
 import fitz  # PyMuPDF
+
+from magrag import profiles
+from magrag.console import setup_console
+from magrag.typography import (
+    DocumentStats,
+    classify_block,
+    looks_like_caption_lead,
+)
 
 # --- ladicí konstanty -------------------------------------------------------
 COLUMN_X_TOLERANCE = 4.0   # o kolik se smí lišit x0/x1 dvou bloků, aby se
@@ -40,82 +45,12 @@ COLUMN_X_TOLERANCE = 4.0   # o kolik se smí lišit x0/x1 dvou bloků, aby se
 MERGE_Y_GAP_MAX = 6.0      # max. mezera (pt) mezi konci/začátky bloků,
                            # aby se ještě slévaly do jednoho
 
-FOOTER_RE = re.compile(r"živa\s+\d/\d{4}|ziva\.avcr\.cz", re.IGNORECASE)
-
-# --- "editorská hantýrka" nalepená přímo na obrázek/schéma ------------------
-# Tohle NENÍ popisek obrázku (souvislý text vysvětlující, co je na obrázku
-# vidět) - je to grafický prvek, kterým editor rozlišuje panely composite
-# obrázku (a, b, c, ...), číslo/písmeno odkazu (1, 2, 3, ...) nebo udává
-# měřítko (scale bar: "1 cm", "0,2 mm", "1 000 μm"). Zachytáváme jen
-# jednoznačné případy - viz omezení v komentáři níž u ANNOTATION_PATTERNS.
-# jedna nebo víc dvojic "číslo (s desetinnou čárkou/tečkou) + jednotka",
-# pokrývá i víc měřítek slitých do jednoho textu ("0,2 mm 1 mm 2 mm")
-SCALE_BAR_RE = re.compile(
-    r"^([\d.,]+\s*(mm|cm|km|μm|µm|nm|m)\s*)+$", re.IGNORECASE)
-LEGEND_WORDS = {"do", "nad", "pod", "až"}  # české spojky v legendě škály
-UNIT_LABEL_RE = re.compile(r"^\[[^\[\]]{1,6}\]$")  # "[°C]", "[%]", "[m]"
-
-# Skutečné popisky obrázků jsou v Živě sazeny STEJNÝM písmem jako běžný
-# text (MeliorCE, ne malé bezpatkové), takže je classify() podle
-# fontu/velikosti nerozezná od těla článku. Poznat je jde podle toho, že
-# skoro vždy začínají odkazem na číslo obrázku hned na začátku bloku:
-# "1 a 2 Nejnápadnějším příznakem...", "3 Schéma normálního...",
-# "9 a 10 ...". (Zkoušel jsem tohle kombinovat ještě s kontrolou, že blok
-# sedí v PDF hned vedle obrázku, ale u přechodů mezi články bývá popisek
-# v surovém pořadí bloků docela daleko od "svého" obrázku - proto se
-# spoléhá jen na tvar textu + minimální délku, aby to nechytlo krátké
-# číslované nadpisy typu "1. Úvod".)
-CAPTION_LEAD_RE = re.compile(
-    r"^\d+(\s*(a|až|,|-|–)\s*\d+)*\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]")
-
-
-def _is_number_token(tok: str) -> bool:
-    return bool(re.fullmatch(r"-?\d+[.,]?\d*", tok))
-
-
-def _is_range_token(tok: str) -> bool:
-    """"3–4", "10-11" - rozsah dvou čísel spojených pomlčkou/dlouhou
-    pomlčkou, typické pro legendu barevné škály na mapě/grafu."""
-    return bool(re.fullmatch(r"-?\d+[.,]?\d*[–-]-?\d+[.,]?\d*", tok))
-
-
-def is_diagram_annotation(text: str) -> bool:
-    """Vrať True pro jasně rozpoznatelné panelové značky/měřítka. Nezachytí
-    to kratší anatomické/technické útržky rozeseté kolem composite obrázků
-    (např. "substantia", "nigra", "karyotyp", "gen IT15") - ty od skutečného
-    popisku nejde spolehlivě odlišit jen podle tvaru textu, chtělo by to
-    znát polohu vůči konkrétnímu obrázku, což tenhle skript nezjišťuje.
-    Klíčové v CELÉM textu jde ale jen o čísla/rozsahy/pár spojek - žádný
-    normální odstavec takhle "čistý" nebude."""
-    t = text.strip()
-    if not t:
-        return False
-    if SCALE_BAR_RE.match(t) or UNIT_LABEL_RE.match(t):
-        return True
-    tokens = t.split()
-    if not tokens:
-        return False
-    # řada holých čísel: "1 2 3 4 5", "35 30 25 20 15 10 5 0" (osa grafu,
-    # číslování panelů)
-    if all(re.fullmatch(r"-?\d+[.,]?\d*\.?", tok) for tok in tokens):
-        return True
-    # legenda barevné škály: "pod -150 -100 až -50 0 až 50 100 až 150 nad 150",
-    # "do 3 3–4 4–5 5–6 ... nad 12"
-    if all(_is_number_token(tok) or _is_range_token(tok)
-           or tok.lower() in LEGEND_WORDS for tok in tokens):
-        return True
-    # řada jednopísmenných/jednociferných značek, klidně s tečkou:
-    # "a b c d e f", "1. 2. 3."
-    if all(len(tok.rstrip(".")) == 1 for tok in tokens):
-        return True
-    return False
-
-# Czech justified text breaks words across lines with a plain hyphen at the
-# line end, e.g. "dlouhodo-" / "bé" (sometimes with a stray extra space
-# around the hyphen too, from justification: "nerovnoměr - ný"). We want to
-# glue these back into "dlouhodobé"/"nerovnoměrný". This must NOT touch the
-# en-dash "–" (U+2013), which Czech typography uses for real phrase breaks
-# ("1990 – 2000") - only the plain ASCII hyphen "-" is a line-wrap artifact.
+# Zarovnaný text láme slova na konci řádku obyčejnou pomlčkou, např.
+# "dlouhodo-" / "bé" (občas i s mezerou navíc kolem pomlčky, jak to vyjde
+# ze zarovnání: "nerovnoměr - ný"). Chceme je slepit zpátky na
+# "dlouhodobé"/"nerovnoměrný". Nesmí se to dotknout dlouhé pomlčky "–"
+# (U+2013), kterou česká typografie používá pro skutečné předěly
+# ("1990 – 2000") - jen obyčejný ASCII spojovník je artefakt zalomení.
 HYPHEN_BREAK_RE = re.compile(r"(\w)\s*-\s*$")
 
 
@@ -170,7 +105,7 @@ def text_of_lines(lines):
 
 def split_lines_by_style(lines, size_tol=3.0):
     """Rozděl řádky JEDNOHO syrového fitz bloku do skupin podle VELIKOSTI
-    písma (ne tučnosti - viz styles_compatible výše). fitz sám dokáže do
+    písma (ne tučnosti - viz styles_compatible níž). fitz sám dokáže do
     jednoho bloku spojit vizuálně blízký, ale obsahově NESOUVISEJÍCÍ text
     - typicky konec jednoho článku/recenze hned navazující na nadpis
     dalšího (reálně nalezeno: "Kontaktní adresy autorů" @ vel. 15 slité
@@ -208,52 +143,13 @@ def dominant_font_and_size(spans):
     """font = nejčastější rodina písma podle počtu znaků (aby krátký tučný
     podnadpis nepřebil font celého odstavce); size = velikost PRVNÍHO spanu
     (nadpisy bývají o chlup větší než tělo textu, a právě tahle drobnost se
-    v originálním JSONu objevuje - viz komentář v assign_articles.py)."""
+    v původním JSONu objevuje - viz komentář v assign_articles.py)."""
     char_counts = Counter()
     for text, font, size in spans:
         char_counts[font] += len(text)
     font = char_counts.most_common(1)[0][0] if char_counts else ""
     size = spans[0][2] if spans else 0.0
     return font, size
-
-
-def classify(text, font, size, bbox, page_num):
-    """Heuristika: typ bloku podle fontu/velikosti. Přizpůsobeno layoutu
-    Živy (MeliorCE = hlavní patkové písmo těla textu a titulků,
-    HelveticaCE/Arial = bezpatkové - popisky, patičky, obálka)."""
-    is_bold = "Bold" in font
-    is_melior = font.startswith("MeliorCE")
-    is_sans = font.startswith("HelveticaCE") or font.startswith("Arial")
-
-    # patička/hlavička s číslem stránky - necháváme jako "body", protože ji
-    # stejně vždycky filtrujeme zvlášť podle FOOTER_RE (viz assign_articles.py)
-    if FOOTER_RE.search(text):
-        return "body"
-
-    if is_melior:
-        if is_bold and size >= 18:
-            return "title"
-        if is_bold and 13 <= size < 18:
-            return "heading"
-        # menší podnadpisy v zadní části čísla ("Kontaktní údaje pro
-        # předplatitele", "Vědci z Akademie věd ČR oceněni Českou hlavou")
-        # bývají přesně velikost 13, ale ne vždy tučně - proto zvlášť
-        if not is_bold and size == 13:
-            return "heading"
-        if not is_bold and 11.5 <= size <= 12.5:
-            return "other"          # autor/autoři článku
-        return "body"
-
-    if is_sans:
-        if size >= 30:
-            return "title"          # velké číslo na obálce, "6 /2014"
-        if is_bold and 11 <= size <= 13:
-            return "other"          # tučné titulky na obálce
-        if is_diagram_annotation(text):
-            return "annotation"     # panel a/b/c, číslo 1/2/3, měřítko 1 cm...
-        return "caption"            # popisky obrázků, copyright, ...
-
-    return "body"  # fallback pro cokoliv neobvyklého (ZapfDingbats apod.)
 
 
 def same_column(b1, b2):
@@ -277,9 +173,12 @@ def styles_compatible(prev_entry, new_spans, size_tol=3.0):
     return abs(prev_size - new_size) <= size_tol
 
 
-def extract_page(page, page_num):
+def merge_page_entries(page):
+    """Syrové fitz bloky jedné stránky -> logické bloky (viz body 2 a 3
+    v hlavičce modulu). Vrací list položek `{"kind": "text"|"image", ...}`,
+    kde místa po obrázcích zůstávají zachovaná kvůli číslování bloků."""
     raw = page.get_text("dict")["blocks"]
-    merged = []          # (kind, payload) kde kind je "text" nebo "image"
+    merged = []
     prev_text_entry = None
 
     for raw_block in raw:
@@ -321,16 +220,18 @@ def extract_page(page, page_num):
                 merged.append(entry)
                 prev_text_entry = entry
 
+    return merged
+
+
+def blocks_from_entries(entries, page_num, profile, stats):
     out = []
-    for block_id, entry in enumerate(merged):
+    for block_id, entry in enumerate(entries):
         if entry["kind"] != "text":
             continue
         font, size = dominant_font_and_size(entry["spans"])
-        btype = classify(entry["text"], font, size, entry["bbox"], page_num)
+        btype = classify_block(profile, entry["text"], font, size, stats)
 
-        text_stripped = entry["text"].strip()
-        if (btype == "body" and len(text_stripped) > 20
-                and CAPTION_LEAD_RE.match(text_stripped)):
+        if btype == "body" and looks_like_caption_lead(entry["text"]):
             btype = "caption"  # popisek obrázku sazený v běžném písmu textu
 
         out.append({
@@ -345,24 +246,44 @@ def extract_page(page, page_num):
     return out
 
 
-def extract_pdf(pdf_path):
+def extract_pdf(pdf_path, profile):
+    """PDF -> list bloků. U adaptivního profilu proběhne dokument dvakrát:
+    poprvé kvůli statistice sazby, podruhé kvůli vlastní klasifikaci."""
     doc = fitz.open(pdf_path)
+    # 1-indexováno, jako v původním JSONu
+    pages = [(i, merge_page_entries(page)) for i, page in enumerate(doc, start=1)]
+
+    stats = None
+    if profile.adaptive:
+        stats = DocumentStats.from_spans(
+            span
+            for _, entries in pages
+            for entry in entries if entry["kind"] == "text"
+            for span in entry["spans"]
+        )
+
     blocks = []
-    for i, page in enumerate(doc, start=1):  # 1-indexováno, jako v původním JSONu
-        blocks.extend(extract_page(page, i))
+    for page_num, entries in pages:
+        blocks.extend(blocks_from_entries(entries, page_num, profile, stats))
     return blocks
 
 
 def main():
-    if len(sys.argv) != 3:
-        print("použití: python extract_blocks.py vstup.pdf vystup_blocks.json")
-        sys.exit(1)
-    pdf_path, out_path = sys.argv[1], sys.argv[2]
-    blocks = extract_pdf(pdf_path)
-    Path(out_path).write_text(
-        json.dumps(blocks, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    print(f"{pdf_path}: {len(blocks)} bloků -> {out_path}")
+    setup_console()
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("pdf", help="vstupní PDF jednoho čísla")
+    ap.add_argument("out", help="výstupní blocks.json")
+    profiles.add_profile_argument(ap)
+    args = ap.parse_args()
+
+    profile = profiles.get(args.profile)
+    blocks = extract_pdf(args.pdf, profile)
+    Path(args.out).write_text(
+        json.dumps(blocks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    counts = Counter(b["type"] for b in blocks)
+    print(f"{args.pdf}: {len(blocks)} bloků -> {args.out}")
+    print("  " + ", ".join(f"{t}={n}" for t, n in counts.most_common()))
 
 
 if __name__ == "__main__":

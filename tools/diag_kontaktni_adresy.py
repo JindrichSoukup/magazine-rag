@@ -10,7 +10,7 @@ Použití:
 import json
 import sys
 
-from assign_articles import is_junk, cluster_columns, find_split_y, texts_match
+from magrag.assign_articles import is_junk, cluster_columns, find_split_y, texts_match
 
 
 def ordered_page_blocks(blocks_by_page, pg):

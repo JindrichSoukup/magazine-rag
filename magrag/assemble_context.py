@@ -45,7 +45,7 @@ def count_tokens(text: str) -> int:
         return len(_TOKENIZER.encode(text))
     return round(len(text) / 2.3)  # hrubý odhad specificky pro češtinu
 
-from embed import embed
+from magrag.embed import embed
 
 DEFAULT_TOP_N = 10
 DEFAULT_WINDOW = 1

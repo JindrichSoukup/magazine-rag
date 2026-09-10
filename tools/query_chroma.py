@@ -19,7 +19,7 @@ import argparse
 
 import chromadb
 
-from embed import embed
+from magrag.embed import embed
 
 
 def run_query(coll, model_name, query_text, top_k, year=None, chunk_type=None):

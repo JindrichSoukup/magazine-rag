@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from embed import embed
+from magrag.embed import embed
 
 # Upravte podle vlastního archivu a znalosti obsahu! "expect_title_substring"
 # je podřetězec, který by se měl objevit v title článku, jehož chunk čekáte

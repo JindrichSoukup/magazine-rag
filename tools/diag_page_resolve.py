@@ -11,7 +11,7 @@ import json
 import sys
 
 sys.path.insert(0, ".")
-from build_page_map import label_to_int, int_to_label
+from magrag.build_page_map import label_to_int, int_to_label
 
 
 def main():

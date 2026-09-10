@@ -15,7 +15,7 @@ pro jedno konkrétní číslo):
 import json
 import sys
 
-from assign_articles import is_junk, cluster_columns, find_split_y, find_heading_positions
+from magrag.assign_articles import is_junk, cluster_columns, find_split_y, find_heading_positions
 
 
 def ordered_page_blocks(blocks_by_page, pg):

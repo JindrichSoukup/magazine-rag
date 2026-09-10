@@ -1,19 +1,21 @@
 """
-Stage 2a: figure out which real PDF page corresponds to which *printed* page
-number (the one shown in the magazine's own running header/footer, e.g. "262"
-or, in the back-matter, roman numerals like "CXXXIII").
+Fáze 2a: zjisti, která skutečná stránka PDF odpovídá kterému *tištěnému*
+číslu stránky (tomu, které je vidět v běžící hlavičce/patičce časopisu,
+např. "262", nebo v příloze římsky "CXXXIII").
 
-Why we need this:
-  ziva_toc.json (built earlier) lists articles with their PRINTED page number
-  ("262", "266", ..., "CXXXIII", ...) because that's what's written on the
-  contents page. But ziva_blocks.json indexes text by the PDF's own page
-  number (1, 2, 3, ...). To know "article X starts on PDF page N" we must
-  translate printed-page-labels -> pdf page indices.
+Proč to potřebujeme:
+  toc.json (z předchozí fáze) uvádí u článků TIŠTĚNÉ číslo stránky
+  ("262", "266", ..., "CXXXIII", ...), protože to je to, co je natištěné
+  v obsahu. Jenže blocks.json indexuje text podle vlastní stránky PDF
+  (1, 2, 3, ...). Abychom věděli "článek X začíná na PDF stránce N",
+  musíme tištěné popisky přeložit na indexy stránek PDF.
 
-How: every page (usually) has a running header/footer line looking like
-    "ziva.avcr.cz 262 živa 6/2014"   or   "živa 6/2014 263 ziva.avcr.cz"
-  which contains exactly one "loose" token that is either an all-digit
-  number or an all-roman-numeral string. We grab that token.
+Jak: skoro každá stránka má běžící hlavičku/patičku, která vypadá třeba
+    "ziva.avcr.cz 262 živa 6/2014"   nebo   "živa 6/2014 263 ziva.avcr.cz"
+  a obsahuje přesně jeden "volný" token, který je buď celý číslo, nebo
+  celý římská číslice. Ten si vezmeme. Jak taková patička u konkrétního
+  časopisu vypadá (font, velikost, klíčové slovo, tokeny k přeskočení),
+  určuje profil zdroje - viz magrag/profiles/.
 
 v3 changes (after real-world testing on other issues):
   - a page-number token that is a SINGLE roman-numeral character ("I", "V",
@@ -32,12 +34,13 @@ v3 changes (after real-world testing on other issues):
     (e.g. a full-page photo with no header) are filled in from that run's
     offset; only pages with no run covering them at all stay unresolved.
 """
+import argparse
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 
-BLOCKS_PATH = Path("ziva_blocks.json")
-OUT_PATH = Path("page_map.json")
+from magrag import profiles
+from magrag.console import setup_console
 
 ROMAN_RE = re.compile(r"^[IVXLCDM]+$", re.IGNORECASE)
 DIGIT_RE = re.compile(r"^\d{1,4}$")
@@ -80,14 +83,19 @@ def int_to_label(scheme: str, value: int) -> str:
     return str(value) if scheme == "arabic" else int_to_roman(value)
 
 
-def extract_label(text: str):
-    """Return the page-number token hiding in a running header/footer line,
-    or None if this doesn't look like one."""
-    if "živa" not in text.lower() and "ziva" not in text.lower():
+def extract_label(text: str, profile):
+    """Vrať token s číslem stránky schovaný v běžící hlavičce/patičce,
+    nebo None, když to jako patička nevypadá.
+
+    Pozor: strategie "keyword" tady kontroluje klíčové slovo ZNOVU, i když
+    už ho ověřil is_footer_block(). Není to zbytečné - extract_label() se
+    volá i samostatně z diagnostických nástrojů, které blok nemají.
+    """
+    if profile.footer_detection == "keyword" and not profile._has_footer_keyword(text):
         return None
     for tok in text.split():
         tok = tok.strip()
-        if tok in ("ziva.avcr.cz", "http://ziva.avcr.cz"):
+        if tok in profile.footer_skip_tokens:
             continue
         if "/" in tok:  # e.g. "6/2014" - issue/year, never the page number
             continue
@@ -167,17 +175,21 @@ def extend_runs_into_gaps(runs, total_pdf_pages, max_extend=5):
     return runs
 
 
-def build_page_map(blocks):
+def build_page_map(blocks, profile):
     """blocks -> {"page_to_label": {...directly detected...},
                   "label_to_page": {...fully resolved, gap-filled...}}"""
+    # Výška stránky se v blocks.json neuvádí, ale spolehlivě se odvodí:
+    # největší y-souřadnice napříč celým číslem je spodní okraj sazby.
+    # Potřebuje ji jen strategie "position" (patička podle polohy).
+    page_height = max((b["bbox"][3] for b in blocks), default=0.0)
+
     # 1) direct detections, per page
     page_to_label = {}
     for b in blocks:
-        if not b["font"].startswith("HelveticaCE-Bold"):
+        if not profile.is_footer_block(b["font"], b["font_size"], b["text"],
+                                       b["bbox"], page_height):
             continue
-        if b["font_size"] >= 9:
-            continue
-        label = extract_label(b["text"])
+        label = extract_label(b["text"], profile)
         if label:
             page_to_label.setdefault(b["page"], label)
 
@@ -214,11 +226,20 @@ def build_page_map(blocks):
 
 
 def main():
-    blocks = json.loads(BLOCKS_PATH.read_text(encoding="utf-8"))
-    result = build_page_map(blocks)
+    setup_console()
+    ap = argparse.ArgumentParser(
+        description="mapování tištěných čísel stránek na stránky PDF")
+    ap.add_argument("blocks", help="vstupní blocks.json (z extract_blocks)")
+    ap.add_argument("out", help="výstupní page_map.json")
+    profiles.add_profile_argument(ap)
+    args = ap.parse_args()
+
+    profile = profiles.get(args.profile)
+    blocks = json.loads(Path(args.blocks).read_text(encoding="utf-8"))
+    result = build_page_map(blocks, profile)
     page_to_label, label_to_page = result["page_to_label"], result["label_to_page"]
 
-    OUT_PATH.write_text(
+    Path(args.out).write_text(
         json.dumps({"page_to_label": page_to_label, "label_to_page": label_to_page,
                     "runs": result["runs"]},
                    ensure_ascii=False, indent=2),

@@ -48,7 +48,7 @@ from pathlib import Path
 
 import numpy as np
 
-from embed import embed, embedding_dim, DEFAULT_MODEL, DEFAULT_BATCH_SIZE
+from magrag.embed import embed, embedding_dim, DEFAULT_MODEL, DEFAULT_BATCH_SIZE
 
 DEFAULT_CHECKPOINT_EVERY = 500
 

@@ -66,16 +66,14 @@ Output: ziva_articles.json - one entry per article:
                             # popisky obrázků
   }
 """
+import argparse
 import json
 import re
 from pathlib import Path
 
-from extract_blocks import looks_like_word_break, HYPHEN_BREAK_RE
-
-BLOCKS_PATH = Path("ziva_blocks.json")
-TOC_PATH = Path("ziva_toc.json")
-PAGE_MAP_PATH = Path("page_map.json")
-OUT_PATH = Path("ziva_articles.json")
+from magrag import profiles
+from magrag.console import setup_console
+from magrag.extract_blocks import looks_like_word_break, HYPHEN_BREAK_RE
 
 COLUMN_GAP = 40  # pt; x0-gap bigger than this starts a new column cluster
 BODY_TYPES = {"title", "heading", "other", "body"}
@@ -289,19 +287,22 @@ def find_heading_positions(ordered_blocks, entries):
     return positions
 
 
-def is_junk(b: dict) -> bool:
+def is_junk(b: dict, profile, page_height: float = 0.0) -> bool:
+    """Opakující se balast, který není obsahem žádného článku.
+
+    První dva testy jsou vlastností konkrétního časopisu (jak vypadá jeho
+    patička a tiráž) a berou se z profilu. Třetí je obecný a platí všude.
+    """
     text = b["text"].strip()
     font = b["font"]
     size = b["font_size"]
 
-    # running header/footer ("ziva.avcr.cz 262 živa 6/2014" and friends)
-    if font.startswith("HelveticaCE-Bold") and size < 9 and (
-        "živa" in text.lower() or "ziva" in text.lower()
-    ):
+    # běžící hlavička/patička ("ziva.avcr.cz 262 živa 6/2014" a podobné)
+    if profile.is_footer_block(font, size, text, b["bbox"], page_height):
         return True
 
-    # copyright strip repeated on every page
-    if "Nakladatelství Academia" in text and "Přetisk" in text:
+    # pruh s tiráží/copyrightem opakovaný na každé stránce
+    if profile.is_junk_text(text):
         return True
 
     # lone figure-number markers overlaid on photos/diagrams, e.g. a block
@@ -332,12 +333,11 @@ def cluster_columns(blocks_on_page):
     return tagged
 
 
-def load_page_map():
-    m = json.loads(PAGE_MAP_PATH.read_text(encoding="utf-8"))
-    return m["label_to_page"]
+def assemble_articles(blocks, toc, label_to_page, profile, year=None, issue=None):
+    # Viz build_page_map: výška stránky se odvodí z bloků, potřebuje ji
+    # detekce patičky podle polohy.
+    page_height = max((b["bbox"][3] for b in blocks), default=0.0)
 
-
-def assemble_articles(blocks, toc, label_to_page, year=None, issue=None):
     # 1) resolve + sort TOC into real reading order ------------------------
     resolved = []
     for entry in toc:
@@ -375,7 +375,8 @@ def assemble_articles(blocks, toc, label_to_page, year=None, issue=None):
         blocks_by_page.setdefault(b["page"], []).append(b)
 
     def ordered_page_blocks(pg):
-        page_blocks = [b for b in blocks_by_page.get(pg, []) if not is_junk(b)]
+        page_blocks = [b for b in blocks_by_page.get(pg, [])
+                       if not is_junk(b, profile, page_height)]
         return [b for col, y0, b in sorted(cluster_columns(page_blocks), key=lambda t: (t[0], t[1]))]
 
     # 5) rozděl bloky mezi SKUPINY - a na hraniční stránce (tam, kde podle
@@ -535,17 +536,30 @@ def assemble_articles(blocks, toc, label_to_page, year=None, issue=None):
 
 
 def main():
-    blocks = json.loads(BLOCKS_PATH.read_text(encoding="utf-8"))
-    toc = json.loads(TOC_PATH.read_text(encoding="utf-8"))
-    label_to_page = load_page_map()
+    setup_console()
+    ap = argparse.ArgumentParser(description="přiřaď bloky textu článkům")
+    ap.add_argument("blocks", help="blocks.json (z extract_blocks)")
+    ap.add_argument("toc", help="toc.json (z create_toc)")
+    ap.add_argument("page_map", help="page_map.json (z build_page_map)")
+    ap.add_argument("out", help="výstupní articles.json")
+    ap.add_argument("--year")
+    ap.add_argument("--issue")
+    profiles.add_profile_argument(ap)
+    args = ap.parse_args()
 
-    articles = assemble_articles(blocks, toc, label_to_page)
+    profile = profiles.get(args.profile)
+    blocks = json.loads(Path(args.blocks).read_text(encoding="utf-8"))
+    toc = json.loads(Path(args.toc).read_text(encoding="utf-8"))
+    label_to_page = json.loads(
+        Path(args.page_map).read_text(encoding="utf-8"))["label_to_page"]
 
-    OUT_PATH.write_text(
-        json.dumps(articles, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    print(f"Wrote {len(articles)} articles ({sum(len(a['chunks']) for a in articles)} "
-          f"chunks total) to {OUT_PATH}")
+    articles = assemble_articles(blocks, toc, label_to_page, profile,
+                                 year=args.year, issue=args.issue)
+
+    Path(args.out).write_text(
+        json.dumps(articles, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"{len(articles)} článků "
+          f"({sum(len(a['chunks']) for a in articles)} bloků) -> {args.out}")
 
 
 if __name__ == "__main__":

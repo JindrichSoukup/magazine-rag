@@ -39,6 +39,9 @@ import json
 import re
 from pathlib import Path
 
+from magrag import profiles
+from magrag.console import setup_console
+
 TARGET_CHARS = 1200
 # Poznámka k limitu 512 tokenů standardních BERT/XLM-R modelů (celá E5
 # rodina): řeší se to teď v embed.py (enforce_max_length) tak, že se ořízne
@@ -50,14 +53,10 @@ TARGET_CHARS = 1200
 OVERLAP_CHARS = 150
 MIN_CHUNK_CHARS = 200  # kratší poslední zbytek radši připoj k předchozímu chunku
 
-SKIP_FIRST_PAGES = 2  # přední obálka + vnitřní strana obálky
-SKIP_LAST_PAGES = 2   # zadní obálka + inzerce příštího čísla
-
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ])")
 
 
-def filter_cover_pages(paragraphs, total_pdf_pages,
-                        skip_first=SKIP_FIRST_PAGES, skip_last=SKIP_LAST_PAGES):
+def filter_cover_pages(paragraphs, total_pdf_pages, skip_first, skip_last):
     """Vynech odstavce z prvních/posledních N stránek PDF (obálka, inzerce
     příštího čísla apod.) - přesně tady, na úrovni chunkování pro RAG, se
     má tahle volba dít (ne dřív v pipeline). Nejčastější dopad: poslední
@@ -154,19 +153,25 @@ def chunk_paragraphs(paragraphs, target_chars=TARGET_CHARS, overlap_chars=OVERLA
     return chunks
 
 
-def build_embedding_text(article: dict, chunk_text: str) -> str:
-    return (
-        f"Časopis: Živa\n"
-        f"Ročník: {article['year']}\n"
-        f"Číslo: {article['issue']}\n"
-        f"Článek: {article['title']}\n"
-        f"Autoři: {article['author'] or 'neuvedeno'}\n"
-        f"Text: {chunk_text}"
+def build_embedding_text(article: dict, chunk_text: str, profile) -> str:
+    """Text, který jde do embedding modelu: chunk s hlavičkou o tom, odkud
+    pochází. Šablonu i její jazyk určuje profil zdroje."""
+    return profile.chunk_header_template.format(
+        journal=profile.journal_name,
+        year=article["year"],
+        issue=article["issue"],
+        title=article["title"],
+        author=article["author"] or profile.unknown_author_label,
+        text=chunk_text,
     )
 
 
-def build_chunks_for_article(article: dict, skip_first=SKIP_FIRST_PAGES,
-                              skip_last=SKIP_LAST_PAGES):
+def build_chunks_for_article(article: dict, profile, skip_first=None,
+                             skip_last=None):
+    if skip_first is None:
+        skip_first = profile.skip_first_pages
+    if skip_last is None:
+        skip_last = profile.skip_last_pages
     out = []
     total_pages = article.get("total_pdf_pages")
 
@@ -185,7 +190,7 @@ def build_chunks_for_article(article: dict, skip_first=SKIP_FIRST_PAGES,
             "page_start": ch["page_start"],
             "page_end": ch["page_end"],
             "text": ch["text"],
-            "embedding_text": build_embedding_text(article, ch["text"]),
+            "embedding_text": build_embedding_text(article, ch["text"], profile),
         })
 
     caption_paragraphs = filter_cover_pages(
@@ -203,29 +208,34 @@ def build_chunks_for_article(article: dict, skip_first=SKIP_FIRST_PAGES,
             "page_start": ch["page_start"],
             "page_end": ch["page_end"],
             "text": ch["text"],
-            "embedding_text": build_embedding_text(article, ch["text"]),
+            "embedding_text": build_embedding_text(article, ch["text"], profile),
         })
     return out
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, help="ziva_corpus.json (z run_all.py)")
+    setup_console()
+    ap = argparse.ArgumentParser(description="nasekej korpus na chunky pro embedding")
+    ap.add_argument("--input", required=True, help="corpus.json (z run_all.py)")
     ap.add_argument("--output", required=True, help="výstupní .jsonl")
-    ap.add_argument("--skip-first", type=int, default=SKIP_FIRST_PAGES,
-                     help="kolik stránek na začátku PDF čísla ignorovat (obálka)")
-    ap.add_argument("--skip-last", type=int, default=SKIP_LAST_PAGES,
-                     help="kolik stránek na konci PDF čísla ignorovat (zadní obálka)")
+    ap.add_argument("--skip-first", type=int, default=None,
+                     help="kolik stránek na začátku PDF čísla ignorovat (obálka); "
+                          "výchozí hodnota je v profilu")
+    ap.add_argument("--skip-last", type=int, default=None,
+                     help="kolik stránek na konci PDF čísla ignorovat (zadní obálka); "
+                          "výchozí hodnota je v profilu")
+    profiles.add_profile_argument(ap)
     args = ap.parse_args()
 
+    profile = profiles.get(args.profile)
     articles = json.loads(Path(args.input).read_text(encoding="utf-8"))
 
     all_chunks = []
     for article in articles:
         if not article.get("full_text", "").strip():
             continue
-        all_chunks.extend(
-            build_chunks_for_article(article, args.skip_first, args.skip_last))
+        all_chunks.extend(build_chunks_for_article(
+            article, profile, args.skip_first, args.skip_last))
 
     with open(args.output, "w", encoding="utf-8") as f:
         for c in all_chunks:
