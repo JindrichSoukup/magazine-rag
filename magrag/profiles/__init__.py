@@ -1,24 +1,26 @@
-"""Profil zdroje - všechno, čím se jeden časopis liší od jiného.
+"""Source profile - everything that makes one magazine differ from another.
 
-Pipeline se dělí na dvě části, které se chovají úplně jinak, když ji
-přenesete na jiný časopis:
+The pipeline splits into two parts that behave very differently when you
+move it to another magazine:
 
-* **Obecná část** (mapování tištěných stránek na PDF stránky, dělení článků
-  podle Y-souřadnice, spojování slov zalomených pomlčkou, chunking,
-  embedding, vektorové úložiště, retrieval) na konkrétní sazbě nezávisí
-  vůbec - pracuje už jen se strukturou `{page, type, font, bbox, text}`.
+* **The generic part** (mapping printed pages to PDF pages, splitting
+  articles by Y coordinate, rejoining hyphenated words, chunking,
+  embedding, the vector store, retrieval) does not depend on the
+  typesetting at all - it works with the structure
+  `{page, type, font, bbox, text}` and nothing else.
 
-* **Sazbě specifická část** je naopak navázaná na jeden konkrétní časopis
-  úplně natvrdo: jak se jmenují fonty, jaká velikost písma znamená titulek,
-  na které straně je obsah čísla, jak vypadá běžící patička.
+* **The typography-specific part** is wired to one magazine completely:
+  what the fonts are called, which point size means a title, which page
+  carries the contents, what the running footer looks like.
 
-Tenhle modul je hranice mezi nimi. Sazbě specifická rozhodnutí jsou tady
-jako **data**, ne jako `if` uprostřed parseru - přidat další časopis pak
-znamená napsat jeden `SourceProfile`, ne sáhnout do pěti skriptů.
+This module is the boundary between them. Typography-specific decisions
+live here as **data**, not as an `if` in the middle of a parser, so adding
+a magazine means writing one `SourceProfile` instead of touching five
+scripts.
 
-Nový profil se nepíše od stolu - použijte `tools/inspect_fonts.py`, který
-z libovolného PDF vypíše, jaké fonty a velikosti se v něm reálně vyskytují
-a v jakém množství. Postup je v README v sekci "Přidání nového časopisu".
+Do not write a new profile from an armchair - run `tools/inspect_fonts.py`,
+which prints which fonts and sizes a given PDF actually uses and in what
+volume. The procedure is in the README under "Adding a new magazine".
 """
 from __future__ import annotations
 
@@ -32,13 +34,13 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 @dataclass(frozen=True)
 class SizeRule:
-    """Jedno pravidlo "velikost písma -> typ bloku" uvnitř jedné rodiny fontů.
+    """One "font size -> block type" rule within a single font family.
 
-    `size_min`/`size_max` jsou obě **včetně**. Pravidla se vyhodnocují
-    v pořadí a vyhrává první, které sedne - u překrývajících se rozsahů
-    tedy rozhoduje pořadí, ne šířka intervalu.
+    `size_min`/`size_max` are both **inclusive**. Rules are evaluated in
+    order and the first match wins, so with overlapping ranges it is the
+    order that decides, not the width of the interval.
 
-    `bold=None` znamená "na tučnosti nezáleží".
+    `bold=None` means "weight does not matter".
     """
     block_type: str
     size_min: float = 0.0
@@ -53,12 +55,13 @@ class SizeRule:
 
 @dataclass(frozen=True)
 class RelativeRule:
-    """Pravidlo adaptivního profilu - velikost písma **relativně** k běžnému
-    textu dokumentu (1,0 = stejně velké jako text článku).
+    """An adaptive-profile rule: font size **relative** to the document's
+    body text (1.0 = the same size as the article text).
 
-    `same_family=True` znamená "stejná rodina písma jako běžný text",
-    `False` "jiná rodina", `None` "nezáleží". Rodina je jméno fontu bez
-    subset prefixu a bez řezu, viz `typography.font_family()`.
+    `same_family=True` means "the same font family as body text", `False`
+    "a different family", `None` "does not matter". The family is the font
+    name without the subset prefix and weight, see
+    `typography.font_family()`.
     """
     block_type: str
     ratio_min: float = 0.0
@@ -76,13 +79,14 @@ class RelativeRule:
 
 @dataclass(frozen=True)
 class FontFamily:
-    """Skupina fontů se společnou sadou pravidel.
+    """A group of fonts sharing one set of rules.
 
-    Rodiny se zkoušejí v pořadí a vyhrává první, jejíž některý prefix sedne
-    na jméno fontu. Když žádné pravidlo uvnitř vyhrané rodiny nesedne,
-    použije se `fallback` **té rodiny** - nepokračuje se do rodiny další.
-    To je podstatné: v patkové sazbě je neznámá velikost skoro jistě běžný
-    text, kdežto v bezpatkové skoro jistě popisek obrázku.
+    Families are tried in order and the first whose prefix matches the
+    font name wins. When no rule inside the winning family matches, **that
+    family's** `fallback` applies - it does not continue into the next
+    family. That matters: in a serif setting an unknown size is almost
+    certainly body text, whereas in a sans setting it is almost certainly
+    a figure caption.
     """
     name: str
     prefixes: tuple[str, ...]
@@ -96,114 +100,122 @@ class FontFamily:
 
 @dataclass(frozen=True)
 class SourceProfile:
-    """Kompletní popis jednoho časopisu pro celou pipeline."""
+    """A complete description of one magazine for the whole pipeline."""
 
-    # --- identita -----------------------------------------------------------
+    # --- identity -----------------------------------------------------------
     key: str
     journal_name: str
     language: str = "cs"
 
-    # --- vstupní soubory ----------------------------------------------------
-    # Pojmenování PDF, ze kterého se vytáhne ročník a číslo. Musí mít dvě
-    # skupiny: (rok, číslo). run_all.py podle toho pojmenuje výstupní složky.
+    # --- input files --------------------------------------------------------
+    # How the PDFs are named, and where the year and issue sit in the name.
+    # Needs at most two groups: (year, issue). run_all.py names the output
+    # directories from them.
     filename_pattern: str = r"(\d{4})-(\d+)\.pdf$"
 
-    # --- obsah čísla --------------------------------------------------------
-    # 0-indexované PDF stránky, na kterých je natištěný obsah čísla.
+    # --- contents page ------------------------------------------------------
+    # Zero-indexed PDF pages carrying the printed contents of the issue.
     toc_page_indices: tuple[int, ...] = (2,)
-    # Font čísla stránky v obsahu (prefix jména fontu + požadavek na
-    # tučnost). `toc_page_number_bold=None` znamená "na řezu nezáleží".
+    # The font of a page number in the contents (font-name prefix plus a
+    # weight requirement). `toc_page_number_bold=None` means "any weight".
     toc_page_number_prefixes: tuple[str, ...] = ()
     toc_page_number_bold: Optional[bool] = None
 
-    # Odvoď si styly položek obsahu ze stránky samotné, místo abys je bral
-    # z nastavení výše. Zapíná se u časopisu, kde konkrétní jména fontů
-    # neznáme nebo se v průběhu archivu mění (MagPi mezi čísly 150 a 152
-    # předělal grafiku včetně fontů i formátu čísel stránek). Podrobně
-    # viz create_toc.detect_entry_styles().
+    # Derive the styles of contents entries from the page itself rather
+    # than from the settings above. Turn this on for a magazine whose font
+    # names are unknown, or change over the archive (The MagPi redesigned
+    # between issues 150 and 152, changing fonts and the page-number
+    # format alike). See create_toc.detect_entry_styles() for details.
     toc_adaptive_styles: bool = False
 
-    # Uvádí obsah čísla u položek autory? Živa ano (a odděluje je barvou),
-    # MagPi ne. Když ne, nemá smysl titulek dělit - jinak se jako autor
-    # vyrobí kus titulku nebo název rubriky.
+    # Does the contents page list authors? Živa does (and separates them
+    # by colour), The MagPi does not. When it does not, splitting the
+    # title is pointless - it would produce part of the title, or the
+    # section name, as the author.
     toc_has_authors: bool = True
-    # Řetězce, které se v obsahu objevují jako tiráž/copyright. `drop`
-    # ořízne titulek od výskytu dál (zbytek řádku je tiráž nalepená na
-    # poslední položku), `skip_span` zahodí celý span (samostatný řádek
-    # tiráže mezi položkami). Jsou to dva různé seznamy schválně: ořezávat
-    # se musí i podle řetězců, které jako samostatný span nikdy nestojí.
+    # Strings that appear in the contents as imprint or copyright. `drop`
+    # truncates the title from that point on (the rest of the line is
+    # imprint glued onto the last entry); `skip_span` discards the whole
+    # span (a standalone imprint line between entries). Two separate lists
+    # deliberately: truncation must also work on strings that never stand
+    # as a span of their own.
     toc_drop_markers: tuple[str, ...] = ()
     toc_skip_span_markers: tuple[str, ...] = ()
 
-    # --- běžící hlavička/patička -------------------------------------------
-    # Jak se patička pozná. Dvě strategie, protože jedna nestačí:
+    # --- running header / footer -------------------------------------------
+    # How the footer is recognised. Two strategies, because one is not
+    # enough:
     #
-    #   "keyword"  - podle obsahu: patička obsahuje název časopisu nebo jeho
-    #                web ("živa 6/2014", "ziva.avcr.cz"). Přesné, ale musí
-    #                se pro každý časopis zjistit, co v patičce stojí.
-    #   "position" - podle polohy: malý text u horního/dolního okraje
-    #                stránky, jehož obsah je v podstatě jen číslo. Funguje
-    #                na neznámém časopise bez kalibrace, za cenu občasného
-    #                falešného poplachu (číslo v rohu grafu).
-    #   "none"     - časopis běžící patičku nemá; mapování tištěných stránek
-    #                se nepoužije.
+    #   "keyword"  - by content: the footer carries the magazine's name or
+    #                its website ("živa 6/2014", "ziva.avcr.cz"). Precise,
+    #                but somebody has to find out what the footer says for
+    #                each magazine.
+    #   "position" - by position: small text near the top or bottom edge
+    #                of the page whose content is essentially just a
+    #                number. Works on an unknown magazine with no
+    #                calibration, at the cost of the occasional false
+    #                positive (a number in the corner of a chart).
+    #   "none"     - the magazine has no running footer; printed-page
+    #                mapping is not used.
     footer_detection: str = "keyword"
-    # Regulární výraz, kterým se patička pozná v libovolném textu
-    # (extract_blocks: takový blok se nikdy neklasifikuje jako nadpis).
+    # A regex that recognises the footer in arbitrary text (extract_blocks
+    # never classifies such a block as a heading).
     footer_pattern: str = ""
-    # Přesnější test pro build_page_map/assign_articles: patička je vždy
-    # týmž malým bezpatkovým písmem, jinak by se pletla s běžným textem.
+    # A stricter test for build_page_map/assign_articles: the footer is
+    # always in the same small sans face, otherwise it would be confused
+    # with body text.
     footer_font_prefixes: tuple[str, ...] = ()
     footer_max_size: float = 9.0
     footer_keywords: tuple[str, ...] = ()
-    # Tokeny uvnitř patičky, které vypadají jako číslo, ale nejsou jím.
+    # Tokens inside the footer that look like a number but are not one.
     footer_skip_tokens: tuple[str, ...] = ()
-    # Jen pro "position": jak vysoko/nízko na stránce se patička hledá,
-    # jako podíl výšky stránky, a kolik slov smí mít.
+    # For "position" only: how high or low on the page the footer is
+    # sought, as a fraction of page height, and how many words it may have.
     footer_zone: float = 0.90
     header_zone: float = 0.08
     footer_max_tokens: int = 5
 
-    # --- opakující se balast na každé stránce -------------------------------
-    # Každá vnitřní n-tice je AND: blok je balast, když obsahuje VŠECHNY
-    # její řetězce. Vnější tice je OR.
+    # --- boilerplate repeated on every page ---------------------------------
+    # Each inner tuple is an AND: a block is boilerplate when it contains
+    # ALL of its strings. The outer tuple is an OR.
     junk_marker_sets: tuple[tuple[str, ...], ...] = ()
 
-    # --- typografie ---------------------------------------------------------
+    # --- typography ---------------------------------------------------------
     families: tuple[FontFamily, ...] = ()
     default_block_type: str = "body"
 
-    # Adaptivní režim: velikosti se neberou absolutně z `families[*].rules`,
-    # ale relativně k běžnému textu dokumentu (viz profiles/adaptive.py).
-    # `families` pak slouží jen jako nositel fallbacků: [0] = rodina textu,
-    # [1] = všechno ostatní.
+    # Adaptive mode: sizes are not taken absolutely from
+    # `families[*].rules` but relative to the document's body text (see
+    # profiles/adaptive.py). `families` then merely carries the fallbacks:
+    # [0] = the body-text family, [1] = everything else.
     adaptive: bool = False
     relative_rules: tuple[RelativeRule, ...] = ()
 
     # --- chunking -----------------------------------------------------------
-    # Kolik stránek na začátku/konci čísla je obálka a inzerce, tedy obsah,
-    # který nemá jít do RAG.
+    # How many pages at the start and end of an issue are covers and ads,
+    # i.e. content that should not enter the RAG corpus.
     skip_first_pages: int = 2
     skip_last_pages: int = 2
 
-    # Hlavička zapečená do textu, který jde do embedding modelu ("contextual
-    # chunking"). Osamocený chunk bez kontextu říká modelu i LLM míň, proto
-    # se před text lepí, ze kterého článku pochází. Jazyk hlavičky se řídí
-    # jazykem korpusu, ne jazykem pipeline - proto je to v profilu.
+    # The header baked into the text that goes to the embedding model
+    # ("contextual chunking"). A lone chunk without context tells both the
+    # model and the LLM less, so the article it came from is prepended.
+    # The header's language follows the corpus, not the pipeline - which
+    # is why it lives in the profile.
     chunk_header_template: str = (
-        "Časopis: {journal}\n"
-        "Ročník: {year}\n"
-        "Číslo: {issue}\n"
-        "Článek: {title}\n"
-        "Autoři: {author}\n"
+        "Magazine: {journal}\n"
+        "Year: {year}\n"
+        "Issue: {issue}\n"
+        "Article: {title}\n"
+        "Authors: {author}\n"
         "Text: {text}"
     )
-    unknown_author_label: str = "neuvedeno"
+    unknown_author_label: str = "unknown"
 
-    # --- odpovídání ---------------------------------------------------------
+    # --- answering ----------------------------------------------------------
     system_prompt_file: str = ""
 
-    # --- odvozené (cache zkompilovaných regexů) -----------------------------
+    # --- derived (cache of compiled regexes) --------------------------------
     _compiled: dict = field(default_factory=dict, repr=False, compare=False)
 
     # ------------------------------------------------------------------ API
@@ -223,20 +235,21 @@ class SourceProfile:
         return self._compiled[key]
 
     def is_footer_text(self, text: str) -> bool:
-        """Vypadá text jako běžící hlavička/patička? (jen podle obsahu)"""
+        """Does this text look like a running header/footer? (content only)"""
         rx = self.footer_re
         return bool(rx.search(text)) if rx else False
 
     def is_footer_block(self, font: str, size: float, text: str,
                         bbox=None, page_height: float = 0.0) -> bool:
-        """Přísnější test než `is_footer_text`, který kromě obsahu bere
-        v úvahu i font, velikost a (u strategie "position") polohu na stránce.
+        """A stricter test than `is_footer_text`: besides the content it
+        weighs the font, the size and (under the "position" strategy) the
+        place on the page.
 
-        Používá ho build_page_map (vytahuje z patičky číslo stránky)
-        a assign_articles (patičku z textu článku vyhazuje). Kontrola fontu
-        je u strategie "keyword" podstatná: samotné klíčové slovo se
-        legitimně vyskytuje i v běžném textu ("časopis Živa vychází..."),
-        a to by číslování stránek rozhodilo.
+        Used by build_page_map, which pulls the page number out of the
+        footer, and by assign_articles, which throws the footer out of the
+        article text. The font check matters under "keyword": the keyword
+        itself legitimately occurs in body text too ("the magazine Živa is
+        published..."), and that would throw the page numbering off.
         """
         if self.footer_detection == "none":
             return False
@@ -251,8 +264,9 @@ class SourceProfile:
                 len(text.split()) <= self.footer_max_tokens
 
         if not self.footer_keywords:
-            # "keyword" bez jediného klíčového slova by prohlásil za patičku
-            # každý malý text na stránce - to je horší než nedetekovat nic.
+            # "keyword" with no keyword at all would declare every small
+            # piece of text on the page a footer - worse than detecting
+            # nothing.
             return False
         return self._has_footer_keyword(text)
 
@@ -290,12 +304,12 @@ class SourceProfile:
     def system_prompt(self) -> str:
         if not self.system_prompt_file:
             raise ValueError(
-                f"profil {self.key!r} nemá nastavený system_prompt_file")
+                f"profile {self.key!r} has no system_prompt_file set")
         return (PROMPTS_DIR / self.system_prompt_file).read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------
-# Registr profilů
+# Profile registry
 # --------------------------------------------------------------------------
 
 def _registry() -> dict[str, SourceProfile]:
@@ -311,13 +325,13 @@ def get(key: str) -> SourceProfile:
     reg = _registry()
     if key not in reg:
         raise KeyError(
-            f"neznámý profil {key!r}; dostupné: {', '.join(sorted(reg))}")
+            f"unknown profile {key!r}; available: {', '.join(sorted(reg))}")
     return reg[key]
 
 
 def add_profile_argument(parser, default: str = "ziva"):
-    """Sjednocený `--profile` přepínač pro všechny vstupní body pipeline."""
+    """The shared `--profile` switch for every pipeline entry point."""
     parser.add_argument(
         "--profile", default=default, choices=available(),
-        help=f"profil zdrojového časopisu (výchozí: {default})")
+        help=f"source magazine profile (default: {default})")
     return parser

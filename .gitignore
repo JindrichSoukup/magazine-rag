@@ -29,3 +29,6 @@ drafts/
 
 # --- pytest ---------------------------------------------------------------
 .pytest_cache/
+
+# --- české verze dokumentace (veřejné jsou anglicky) ----------------------
+docs-cs/

@@ -1,18 +1,19 @@
-"""
-Fáze 0: vytáhni obsah čísla (kdo/co/na jaké tištěné stránce) ze stránky
-s obsahem -> toc.json
+"""Stage 0: pull the issue's contents (who / what / on which printed page)
+off the contents page -> toc.json
 
-Logika: číslo tištěné stránky je v obsahu vysázené jiným řezem než zbytek
-řádku (u Živy MeliorCE Bold) a slouží jako oddělovač položek; uvnitř jedné
-položky odděluje titulek od autora BARVA prvního spanu. Obojí je vlastnost
-konkrétní sazby, takže obojí přichází z profilu zdroje.
+How it works: the printed page number is set in a different weight from
+the rest of the line (MeliorCE Bold in Živa) and acts as the separator
+between entries; inside one entry, the COLOUR of the first span separates
+the title from the author. Both are properties of a specific typesetting,
+so both come from the source profile.
 
-Pokud je pod jedním číslem stránky natištěno víc položek oddělených
-středníkem ("24. ročník...; Zaujalo nás: ..."), rozdělí se na samostatné
-záznamy TOC se stejnou printed_page - assign_articles.py je pak podle
-vlastních nadpisů v textu rozliší (viz find_heading_positions tam).
+If several items are printed under one page number, separated by a
+semicolon ("24. ročník...; Zaujalo nás: ..."), they are split into
+separate TOC records sharing a printed_page - assign_articles.py then
+tells them apart by their own headings in the text (see
+find_heading_positions there).
 
-    python -m magrag.create_toc --profile ziva vstup.pdf toc.json
+    python -m magrag.create_toc --profile ziva input.pdf toc.json
 """
 import argparse
 import json
@@ -26,28 +27,29 @@ from magrag import profiles
 from magrag.console import setup_console
 from magrag.typography import font_style_key
 
-# Kolik prvních stránek se prohledá, když profil neurčuje, kde obsah čísla
-# je (prázdné toc_page_indices) - viz find_toc_pages().
+# How many leading pages are searched when the profile does not say where
+# the contents are (empty toc_page_indices) - see find_toc_pages().
 TOC_SEARCH_PAGES = 8
 TOC_MIN_ENTRIES = 5
-# Jak hustá musí být další stránka oproti té nejlepší, aby se taky
-# považovala za část obsahu (obsah bývá rozložený přes dvoustranu).
+# How dense another page must be relative to the best one to also count
+# as part of the contents (they are usually spread across a spread).
 TOC_PEER_RATIO = 0.4
-# Totéž pro dvojice "styl čísla + styl titulku" uvnitř obsahu: jak častá
-# musí dvojice být oproti nejčastější, aby se brala za skutečné položky,
-# a ne za ozdobnou upoutávku nebo název rubriky.
+# The same for "number style + title style" pairs inside the contents:
+# how frequent a pair must be relative to the most frequent one to count
+# as real entries rather than a decorative callout or a section heading.
 TOC_STYLE_PEER_RATIO = 0.4
 
 
 def strip_control_chars(text: str) -> str:
-    """Nahraď řídicí znaky mezerou.
+    """Replace control characters with a space.
 
-    Do textu se dostávají z ozdobných glyfů sázených symbolovým fontem -
-    reálný případ (MagPi): odrážka před každou položkou obsahu vyjde
-    z PDF jako U+0007. V titulku článku nemá co dělat a rozbíjí porovnání
-    titulku z obsahu s nadpisem nalezeným v těle čísla (texts_match
-    v assign_articles). Řeší se to porovnáním znaků, ne regulárním
-    výrazem s rozsahem - ten se špatně čte a snadno se v něm udělá chyba.
+    They arrive from decorative glyphs set in a symbol font - a real case
+    (The MagPi): the bullet before every contents entry comes out of the
+    PDF as U+0007. It has no business in an article title and it breaks
+    the comparison between a contents title and the heading found in the
+    body of the issue (texts_match in assign_articles). This compares
+    characters rather than using a regex with a range: a range is hard to
+    read and easy to get wrong.
     """
     return "".join(" " if ch < " " or ch == "\x7f" else ch for ch in text)
 
@@ -57,10 +59,10 @@ def clean(text):
 
 
 def remove_footer(text, profile):
-    """Ořízni titulek/autora od místa, kde na něj navazuje tiráž.
+    """Truncate a title or author from the point where the imprint begins.
 
-    Tiráž bývá vysázená jako pokračování posledního řádku obsahu, takže se
-    bez tohohle připlete do titulku poslední položky.
+    The imprint is often set as a continuation of the last contents line,
+    so without this it ends up inside the last entry's title.
     """
     for marker in profile.toc_drop_markers:
         if marker in text:
@@ -69,8 +71,9 @@ def remove_footer(text, profile):
 
 
 def is_roman(text):
-    # case-insensitive: sazečský šotek občas vloudí malé písmeno doprostřed
-    # římské číslice ("CXLVIiI") - viz stejná oprava v build_page_map.py
+    # Case-insensitive: a typesetting slip occasionally drops a lowercase
+    # letter into the middle of a Roman numeral ("CXLVIiI") - see the same
+    # fix in build_page_map.py.
     return bool(re.fullmatch(r"[IVXLCDM]+", text.strip(), re.IGNORECASE))
 
 
@@ -79,26 +82,27 @@ def is_page_number(text):
     return text.isdigit() or is_roman(text)
 
 
-# Zkrácený rozsah stránek, typicky u drobných zadních položek, které se
-# vejdou na necelé dvě stránky: "XXXI–II" (= XXXI až XXXII) nebo arabsky
-# "285-6" (= 285 až 286). Bez tohohle is_page_number() na takový token
-# vůbec nesedne (obsahuje pomlčku/dlouhou pomlčku), takže se nepozná jako
-# začátek nového záznamu v obsahu a jeho titulek se mylně přilepí k
-# předchozímu záznamu.
+# An abbreviated page range, typical of small back-matter items that fit
+# in under two pages: "XXXI–II" (= XXXI to XXXII), or in Arabic "285-6"
+# (= 285 to 286). Without this, is_page_number() does not match such a
+# token at all (it contains a hyphen or en dash), so it is not recognised
+# as the start of a new contents record and its title is wrongly glued to
+# the previous one.
 RANGE_RE = re.compile(r"^([IVXLCDM]+|\d+)\s*[-–]\s*([IVXLCDM]+|\d+)$", re.IGNORECASE)
 
 
 def page_span_value(text):
-    """Vrať skutečnou hodnotu tištěné stránky pro token, který vypadá jako
-    číslo stránky - i pro zkrácený rozsah (viz RANGE_RE výše). Vrací JEN
-    počáteční stránku rozsahu - to je vše, co pipeline dál potřebuje
-    (konec článku se stejně dopočítává podle začátku NÁSLEDUJÍCÍHO
-    záznamu v obsahu, ne podle konce vlastního rozsahu).
+    """Return the real printed-page value for a token that looks like a
+    page number, abbreviated ranges included (see RANGE_RE above).
 
-    Text se nejdřív pročistí přes clean(): u MagPi 150 přichází číslo
-    položky spolu s tabulátorem a ozdobnou odrážkou (U+0007) nalepenými
-    do téhož spanu. Bez pročištění se takové číslo vůbec nepozná a celá
-    položka obsahu se ztratí - beze stopy, protože nic nespadne.
+    Only the START of a range is returned - that is all the pipeline needs
+    downstream, because an article's end is derived from the start of the
+    NEXT contents record, not from the end of its own range.
+
+    The text is cleaned first: in MagPi 150 an entry's number arrives with
+    a tab and a decorative bullet (U+0007) glued into the same span.
+    Without cleaning, such a number is not recognised at all and the whole
+    contents entry is lost - without a trace, because nothing crashes.
     """
     text = clean(text)
     if is_page_number(text):
@@ -111,11 +115,12 @@ def page_span_value(text):
 
 
 def is_page_span(span, profile):
-    """Je tenhle span číslo tištěné stránky, tedy začátek nové položky?
+    """Is this span a printed page number, i.e. the start of a new entry?
 
-    Nestačí, že text vypadá jako číslo - v titulcích jsou čísla běžně
-    ("24. ročník", "Rok 1968"). Rozhoduje až řez písma, který je pro čísla
-    stránek v obsahu vyhrazený (viz toc_page_number_prefixes v profilu).
+    It is not enough that the text looks like a number - titles contain
+    numbers routinely ("24. ročník", "Rok 1968"). What decides is the
+    font weight reserved for page numbers in the contents (see
+    toc_page_number_prefixes in the profile).
     """
     txt = span["text"].strip()
     return (page_span_value(txt) is not None
@@ -141,8 +146,8 @@ def split_title_author(spans):
 
 
 def count_toc_entries(page, profile):
-    """Kolik "začátků položky" (= čísel stránek ve vyhrazeném řezu) je na
-    téhle stránce. Slouží jen k detekci, na které stránce obsah je."""
+    """How many "entry starts" - page numbers in the reserved weight -
+    this page carries. Used only to detect which page the contents are on."""
     n = 0
     for block in page.get_text("dict")["blocks"]:
         for line in block.get("lines", ()):
@@ -153,23 +158,26 @@ def count_toc_entries(page, profile):
 
 
 def find_toc_pages(doc, profile):
-    """Najdi stránky s obsahem čísla, když je profil neurčuje napevno.
+    """Find the pages holding the issue's contents when the profile does
+    not pin them down.
 
-    U známého časopisu je obsah vždy na stejné fyzické stránce a hádat se
-    nemá co (`toc_page_indices` v profilu). U neznámého to nikdo předem
-    neví, takže se prohledá začátek čísla a hledá se nejhustší nakupení
-    čísel stránek - obsah je takové nakupení z definice.
+    For a known magazine the contents are always on the same physical page
+    and there is nothing to guess (`toc_page_indices` in the profile). For
+    an unknown one nobody knows in advance, so the front of the issue is
+    searched for the densest cluster of page numbers - which is what a
+    contents page is by definition.
 
-    **Stránek je víc než jedna.** Obsah bývá rozložený přes dvoustranu,
-    u tlustšího čísla i přes tři stránky proložené inzercí (reálně: MagPi
-    má obsah na stranách 5, 6 a 8). Vzít jen tu nejlepší znamená přijít
-    o dvě třetiny čísla - a nepozná se to jako chyba, protože zbytek
-    pipeline poslušně zpracuje to, co dostal.
+    **There is more than one page.** The contents are usually spread over
+    a double page, and in a thicker issue across three pages separated by
+    advertising (in reality: The MagPi has its contents on pages 5, 6 and
+    8). Taking only the best one loses two thirds of the issue - and it
+    does not register as an error, because the rest of the pipeline
+    dutifully processes whatever it was given.
 
-    Práh je dvojí: absolutní `TOC_MIN_ENTRIES` odliší obsah od stránky,
-    kde se pár čísel sešlo náhodou, a relativní `TOC_PEER_RATIO` k té
-    nejlepší stránce přibere její protějšky, ale ne stránku s jedním
-    zatoulaným číslem.
+    Two thresholds: the absolute `TOC_MIN_ENTRIES` tells the contents
+    apart from a page where a few numbers happened to meet, and the
+    relative `TOC_PEER_RATIO` against the best page picks up its
+    counterparts but not a page with one stray number.
     """
     counts = {i: count_toc_entries(doc[i], profile)
               for i in range(min(TOC_SEARCH_PAGES, doc.page_count))}
@@ -181,10 +189,11 @@ def find_toc_pages(doc, profile):
 
 
 def _starts_entry(span, txt, style, profile, number_styles):
-    """Je tenhle span číslem stránky, kterým začíná nová položka obsahu?
+    """Is this span a page number that begins a new contents entry?
 
-    Dvě cesty podle profilu: buď rozhoduje font zapsaný v profilu (Živa),
-    nebo styl odvozený ze stránky samotné (viz detect_entry_styles).
+    Two routes depending on the profile: either the font written into the
+    profile decides (Živa), or the style derived from the page itself
+    (see detect_entry_styles).
     """
     if page_span_value(txt) is None:
         return False
@@ -194,7 +203,7 @@ def _starts_entry(span, txt, style, profile, number_styles):
 
 
 def collect_spans(doc, page_indices):
-    """Všechny neprázdné spany ze zadaných stránek, v pořadí sazby."""
+    """Every non-empty span from the given pages, in typesetting order."""
     out = []
     for page_index in page_indices:
         for block in doc[page_index].get_text("dict")["blocks"]:
@@ -206,46 +215,43 @@ def collect_spans(doc, page_indices):
 
 
 def detect_entry_styles(spans, profile):
-    """Odvoď ze stránky s obsahem, jak vypadá číslo položky a jak její text.
+    """Derive from the contents page what an entry's number looks like and
+    what its text looks like.
 
-    Proč to nejde zapsat do profilu jako u Živy: MagPi mezi čísly 150 a 152
-    předělal grafiku. Změnily se fonty (Rajdhani/RobotoSlab -> Roboto*),
-    velikosti i formát čísel (`22` -> `032`). Jedna sada napevno zadaných
-    hodnot by tedy platila jen pro část archivu, a co hůř, na zbytku by
-    tiše vyrobila nesmysly místo aby spadla.
+    Why this cannot be written into the profile the way it is for Živa:
+    The MagPi redesigned between issues 150 and 152. Fonts changed
+    (Rajdhani/RobotoSlab to Roboto*), so did sizes and the number format
+    ("22" to "032"). One set of hard-coded values would hold for part of
+    the archive only and, worse, would quietly produce nonsense on the
+    rest instead of failing.
 
-    Co ale platí v obou grafikách: **na stránce s obsahem jsou tři různé
-    druhy čísel a jen jeden z nich jsou položky.** Vedle skutečných čísel
-    stránek tam stojí ozdobné upoutávky vysázené vývratně (bíle, o něco
-    větším písmem) a číslo samotné stránky s obsahem v běžící patičce.
-    Odlišit je jde tím, že skutečných položek je nejvíc - obsah je jejich
-    seznam, kdežto upoutávek je pár.
+    What does hold across both designs: **a contents page carries three
+    different kinds of number and only one of them is an entry.** Besides
+    the real page numbers there are decorative callouts, reversed out in
+    white in slightly larger type, and the number of the contents page
+    itself in the running footer. They are told apart by the fact that
+    the real entries are the most numerous - the contents are a list of
+    them, whereas there are only a handful of callouts.
 
-    Vrací `(množina stylů čísla, množina stylů textu)`, kde styl je
-    `(rodina písma, velikost)`. Styly textu se hledají zvlášť, protože
-    bývají jiné než styl čísla (u MagPi 150 je číslo Rajdhani a titulek
-    RobotoSlab), a berou se z prvního spanu za každým přijatým číslem -
-    ten je titulkem vždy. Tím se z položek vyřadí názvy rubrik, tiráž
-    a popisky u ozdobných upoutávek.
-
-    Stylů textu je **množina, ne jeden vítěz**: obsah legitimně míchá
-    velikosti (Živa má titulky 10 b a autory 9,5 b, MagPi jednu jedinou).
-    Vzít jen nejčastější z nich by u Živy zahodilo třetinu položek - což
-    se při vývoji taky stalo. Práh je stejný jako u hledání stránek
-    s obsahem: styl se počítá, pokud je aspoň `TOC_STYLE_PEER_RATIO`
-    toho nejčastějšího.
+    Returns `(a set of number styles, a set of text styles)`, where a
+    style is `(font family, size)`. Text styles are sought separately
+    because they are usually different from the number style (in MagPi
+    150 the number is Rajdhani and the title RobotoSlab), and they are
+    taken from the first span after each accepted number, which is always
+    the title. That is what filters out section headings, the imprint and
+    the captions under decorative callouts.
     """
     pairs = _number_text_pairs(spans)
     if not pairs:
         return None, None
 
-    # Nejčastější dvojice je z definice ta pravá: obsah je seznam, takže
-    # se v něm tentýž pár "číslo + titulek" opakuje u každé položky.
-    # Rovnocenných párů ale může být víc - Živa má v obsahu dvě velikosti
-    # čísel (9 a 10 b) a obě jsou pravé - takže se berou všechny, které
-    # jsou dost časté. Rozestup je na reálných datech pohodlný: u Živy má
-    # druhý pár 79 % četnosti prvního, u MagPi má první ozdobná upoutávka
-    # 14 %.
+    # The most frequent pair is by definition the real one: the contents
+    # are a list, so the same "number + title" pair repeats for every
+    # entry. There can be several equally valid pairs, though - Živa uses
+    # two sizes of number (9 and 10pt) and both are real - so every
+    # sufficiently frequent one is taken. The gap on real data is
+    # comfortable: in Živa the second real pair sits at 79% of the first,
+    # in The MagPi the first decorative callout at 14%.
     best = pairs.most_common(1)[0][1]
     threshold = best * TOC_STYLE_PEER_RATIO
     accepted = [(num, text) for (num, text), n in pairs.items() if n >= threshold]
@@ -253,19 +259,20 @@ def detect_entry_styles(spans, profile):
 
 
 def _number_text_pairs(spans):
-    """Spočítej dvojice (styl čísla, styl textu hned za ním).
+    """Count (number style, style of the text right after it) pairs.
 
-    Text hned za číslem je titulkem položky vždy - proto se styly hledají
-    přes tuhle dvojici, a ne přes četnost stylů samu o sobě. Kdyby se
-    bral jen nejčastější styl čísla, u časopisu se dvěma velikostmi čísel
-    v obsahu (Živa) by se polovina položek ztratila.
+    The text right after a number is always the entry's title, which is
+    why styles are found through this pair rather than through the
+    frequency of styles on their own. Taking just the most frequent
+    number style would lose half the entries in a magazine that uses two
+    sizes of number in its contents (Živa).
     """
     pairs = Counter()
     pending = None
     for span in spans:
         style = font_style_key(span["font"], span["size"])
         if page_span_value(span["text"]) is not None:
-            pending = style          # čeká na svůj titulek
+            pending = style          # waiting for its title
         elif pending is not None:
             pairs[(pending, style)] += 1
             pending = None
@@ -273,9 +280,9 @@ def _number_text_pairs(spans):
 
 
 def build_toc(pdf_path, profile, toc_page_indices=None):
-    """toc_page_indices jsou 0-indexovaná čísla stránek PDF, na kterých je
-    natištěný obsah čísla. Když se nepředají, vezmou se z profilu; když je
-    ani profil neurčuje, zkusí se detekovat (viz find_toc_pages)."""
+    """toc_page_indices are zero-indexed PDF pages carrying the printed
+    contents. When not given they come from the profile; when the profile
+    does not pin them either, detection is attempted (see find_toc_pages)."""
     doc = fitz.open(pdf_path)
     if toc_page_indices is None:
         toc_page_indices = profile.toc_page_indices or find_toc_pages(doc, profile)
@@ -302,7 +309,7 @@ def build_toc(pdf_path, profile, toc_page_indices=None):
         if current is None:
             continue
         if text_styles is not None and style not in text_styles:
-            continue  # název rubriky, tiráž, popisek u ozdobné upoutávky
+            continue  # section heading, imprint, caption of a callout
         if any(m in txt for m in profile.toc_skip_span_markers):
             continue
         current["spans"].append({
@@ -320,12 +327,13 @@ def build_toc(pdf_path, profile, toc_page_indices=None):
             title = clean(" ".join(s["text"] for s in item["spans"]))
             author = None
         if title:
-            # Časopis občas natiskne víc krátkých položek na jedné stránce
-            # pod JEDNÍM společným číslem stránky v obsahu, oddělené
-            # středníkem v titulku ("24. ročník...; Zaujalo nás: ...").
-            # Rozdělíme to na samostatné záznamy se stejnou printed_page -
-            # assign_articles.py je pak uvnitř té sdílené stránky rozliší
-            # podle vlastních nadpisů v textu (viz find_heading_positions).
+            # A magazine sometimes prints several short items on one page
+            # under ONE shared page number in the contents, separated by
+            # a semicolon in the title ("24. ročník...; Zaujalo nás:
+            # ..."). Split them into separate records sharing a
+            # printed_page - assign_articles.py then tells them apart
+            # inside that shared page by their own headings (see
+            # find_heading_positions).
             for part in title.split(";"):
                 part = part.strip()
                 if part:
@@ -339,13 +347,14 @@ def build_toc(pdf_path, profile, toc_page_indices=None):
 
 def main():
     setup_console()
-    ap = argparse.ArgumentParser(description="vytáhni obsah čísla z PDF")
-    ap.add_argument("pdf", help="vstupní PDF jednoho čísla")
-    ap.add_argument("out", help="výstupní toc.json")
+    ap = argparse.ArgumentParser(
+        description="pull the issue's contents out of a PDF")
+    ap.add_argument("pdf", help="input PDF of a single issue")
+    ap.add_argument("out", help="output toc.json")
     ap.add_argument("--toc-page", type=int, action="append", dest="toc_pages",
-                    help="0-indexovaná stránka PDF s obsahem čísla; lze zadat "
-                         "vícekrát. Bez tohohle se použije profil, případně "
-                         "automatická detekce.")
+                    help="zero-indexed PDF page holding the contents; may be "
+                         "given more than once. Without it the profile is "
+                         "used, or failing that automatic detection.")
     profiles.add_profile_argument(ap)
     args = ap.parse_args()
 
@@ -354,7 +363,7 @@ def main():
                     tuple(args.toc_pages) if args.toc_pages else None)
     Path(args.out).write_text(
         json.dumps(toc, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"{args.pdf}: {len(toc)} položek obsahu -> {args.out}")
+    print(f"{args.pdf}: {len(toc)} contents entries -> {args.out}")
 
 
 if __name__ == "__main__":

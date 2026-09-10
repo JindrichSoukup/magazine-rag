@@ -1,38 +1,43 @@
-"""Profil: The MagPi (Raspberry Pi Press), licence CC BY-NC-SA 3.0.
+"""Profile: The MagPi (Raspberry Pi Press), licensed CC BY-NC-SA 3.0.
 
-Proč zrovna MagPi: pipeline vznikla nad Živou, jejíž obsah je autorsky
-chráněný a nemůže být součástí veřejného dema. MagPi je strukturně skoro
-totožný případ - měsíčník v born-digital PDF, vícesloupcová sazba, obálka,
-obsah čísla na pevném místě, běžící patička s číslem stránky - ale vychází
-pod otevřenou licencí, takže se z něj dá udělat ukázka, kterou jde
-zveřejnit. Čísla se stahují z magpi.raspberrypi.com/issues.
+Why The MagPi: the pipeline grew up on Živa, whose contents are under
+copyright and cannot be part of a public demo. The MagPi is structurally
+almost the same case - a monthly in born-digital PDF, multi-column
+setting, covers, a contents page at a predictable place, a running footer
+with the page number - but it is published under an open licence, so it
+can be shown. Issues are downloaded from magpi.raspberrypi.com/issues.
 
-**Typografie se tu nekalibruje ručně, ale odvozuje z dokumentu**
-(`adaptive=True`, viz `profiles/adaptive.py`). Je to vědomý kompromis:
-ruční profil jako `ziva.py` je přesnější, ale předpokládá, že někdo pro
-každý ročník ověřil jména fontů a velikosti písma. MagPi za deset let
-několikrát změnil grafiku, takže jedna sada absolutních hodnot by stejně
-neplatila napříč archivem - relativní pravidla to ustojí.
+**The typography here is not calibrated by hand but derived from the
+document** (`adaptive=True`, see `profiles/adaptive.py`). That is a
+deliberate trade: a hand profile like `ziva.py` is more accurate, but it
+assumes somebody has verified font names and point sizes for every
+volume. The MagPi has redesigned several times over a decade, so one set
+of absolute values would not hold across the archive anyway; relative
+rules survive it.
 
-Chcete-li přesnost ruční kalibrace pro konkrétní ročník, pusťte
+If you want hand-calibrated accuracy for one particular volume, run
 
-    python -m tools.inspect_fonts cesta/k/MagPi155.pdf
+    python -m tools.inspect_fonts path/to/MagPi155.pdf
 
-a hodnoty z výpisu přepište do vlastního profilu podle vzoru `ziva.py`
-(stačí doplnit `families` a `adaptive=False`) - zbytek nastavení níž
-zůstává v platnosti.
+and copy the values from its output into a profile of your own, following
+`ziva.py` (fill in `families` and set `adaptive=False`). Everything else
+below still applies.
 
-**Co bylo potřeba nastavit jinak než u Živy:**
+**What had to be set differently from Živa:**
 
-* Patička se hledá **podle polohy**, ne podle klíčového slova. Živa má
-  v patičce vlastní název a doménu, takže se dá chytit textem; MagPi má
-  v patičce jen číslo stránky, takže rozhoduje "malý text u dolního okraje
-  stránky, který je v podstatě jen číslo".
-* Čísla jsou průběžná (MagPi 1, 2, ... 155), ne ročník + číslo. Vzor
-  jména souboru má proto jen jednu skupinu a `run_all.py` z ní udělá
-  dvojici s prázdným ročníkem.
-* Metadatová hlavička chunku i systémový prompt jsou anglicky - jazyk
-  se řídí korpusem, ne jazykem pipeline.
+* The footer is found **by position**, not by keyword. Živa puts its own
+  name and domain in the footer, so it can be caught by content; The
+  MagPi puts only the page number there, so what decides is "small text
+  near the bottom edge that is essentially just a number".
+* Issues are numbered continuously (MagPi 1, 2, ... 155) rather than by
+  year and issue. The filename pattern therefore has a single group and
+  `run_all.py` turns it into a pair with an empty year.
+* The styles of contents entries are derived from the page itself. The
+  MagPi redesigned between issues 150 and 152: fonts changed
+  (Rajdhani/RobotoSlab to Roboto*), as did sizes and the page-number
+  format ("22" to "032").
+* The chunk metadata header and the system prompt are in English - the
+  language follows the corpus, not the pipeline.
 """
 from .adaptive import RELATIVE_RULES
 from . import FontFamily, SourceProfile
@@ -45,20 +50,21 @@ PROFILE = SourceProfile(
     # "MagPi155.pdf", "The-MagPi-155.pdf", "MagPi-155.pdf", "magpi_155.pdf"
     filename_pattern=r"(?:the[-_ ]?)?magpi[-_ ]?(\d{1,3})\.pdf$",
 
-    # Obsah čísla nebývá vždy na téže straně (mění se rozsah úvodní inzerce)
-    # a bývá rozložený přes dvě až tři stránky - viz create_toc.find_toc_pages.
+    # The contents are not always on the same page (the amount of front
+    # advertising varies) and are spread across two or three pages - see
+    # create_toc.find_toc_pages.
     toc_page_indices=(),
-    # Styly položek obsahu se odvozují ze stránky samotné. MagPi mezi čísly
-    # 150 a 152 předělal grafiku: změnily se fonty (Rajdhani/RobotoSlab ->
-    # Roboto*), velikosti i formát čísel stránek ("22" -> "032"). Napevno
-    # zadané hodnoty by tedy platily jen pro část archivu a na zbytku by
-    # tiše vyrobily nesmysly. Viz create_toc.detect_entry_styles.
+    # Entry styles are derived from the page itself. Hard-coded values
+    # would hold for part of the archive only and would quietly produce
+    # nonsense on the rest. See create_toc.detect_entry_styles.
     toc_adaptive_styles=True,
-    # Obsah MagPi u položek autory neuvádí. Kdyby se titulek přesto dělil,
-    # jako autor by vyšel název rubriky ("Tutorials", "Project Showcase").
+    # The MagPi's contents do not list authors. If the title were split
+    # anyway, the section name ("Tutorials", "Project Showcase") would
+    # come out as the author.
     toc_has_authors=False,
 
-    # Patička MagPi obsahuje jen číslo stránky, na obsah se chytit nedá.
+    # The MagPi's footer holds nothing but the page number, so there is
+    # no content to latch onto.
     footer_detection="position",
     footer_max_size=12.0,
     footer_zone=0.90,

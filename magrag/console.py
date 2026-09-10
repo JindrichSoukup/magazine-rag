@@ -1,32 +1,33 @@
-"""Konzole: vynuť UTF-8 na stdout/stderr.
+"""Console setup: force UTF-8 on stdout/stderr.
 
-Proč to tu je: všechny hlášky pipeline jsou česky a na Windows má konzole
-ve výchozím stavu kódování cp1252. První `print()` s diakritikou pak spadne
-na `UnicodeEncodeError` - a to ještě předtím, než se stihne zpracovat jediná
-stránka PDF:
+Why this exists: the pipeline prints diagnostics containing text pulled
+straight out of the source PDF, and on Windows the console defaults to
+cp1252. The first `print()` carrying a non-Latin-1 character then dies
+before a single page has been processed:
 
     UnicodeEncodeError: 'charmap' codec can't encode character '\\u010d'
 
-Ve Spyderu/IPythonu se to neprojeví (ty mají stdout v UTF-8), takže je to
-přesně ten druh chyby, kterou autor nikdy nevidí a každý, kdo si projekt
-naklonuje, do ní narazí do dvou sekund. Řeší se to jedním voláním na začátku
-každého vstupního bodu, ne návodem v README, ať to nejde zapomenout.
+Spyder and IPython don't show this (their stdout is already UTF-8), which
+makes it exactly the kind of bug the author never sees and everyone who
+clones the project hits within two seconds. It is fixed with one call at
+the top of every entry point rather than a note in the README, so that it
+cannot be forgotten.
 """
 import sys
 
 
 def setup_console() -> None:
-    """Přepni stdout/stderr na UTF-8 s náhradou neznámých znaků.
+    """Switch stdout/stderr to UTF-8, replacing anything unencodable.
 
-    `errors="replace"` je tu záměrně: hlášky pipeline občas vypisují úryvky
-    textu ze zdrojového PDF, kde se může objevit exotický znak (řecká
-    písmena v biologických názvech, matematické symboly). Spadnout kvůli
-    výpisu diagnostiky by bylo horší než vypsat otazník.
+    `errors="replace"` is deliberate: diagnostics quote fragments of the
+    source PDF, which can contain the odd exotic character (Greek letters
+    in biological names, mathematical symbols). Crashing over a diagnostic
+    message would be worse than printing a question mark.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:  # None u přesměrovaného/obaleného streamu
+        if reconfigure is not None:  # None on a redirected/wrapped stream
             try:
                 reconfigure(encoding="utf-8", errors="replace")
             except (ValueError, OSError):
-                pass  # stream nejde překonfigurovat - lepší běžet dál
+                pass  # stream refuses reconfiguration - better to carry on
