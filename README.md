@@ -1,5 +1,7 @@
 # magazine-rag — a magazine's PDF archive → corpus → RAG
 
+[![tests](https://github.com/JindrichSoukup/magazine-rag/actions/workflows/tests.yml/badge.svg)](https://github.com/JindrichSoukup/magazine-rag/actions/workflows/tests.yml)
+
 A pipeline that turns a magazine's back-catalogue of PDFs into a
 structured corpus of articles with metadata and citable page numbers,
 embeds it, and answers questions over it with references to the source.
