@@ -107,6 +107,10 @@ PROFILE = SourceProfile(
         "Text: {text}"
     ),
     unknown_author_label="neuvedeno",
+    citation_template=(
+        "{title} ({journal} {year}/{issue}, {pages}), autoři: {author}"),
+    page_single_label="str. {page}",
+    page_range_label="str. {start}-{end}",
 
     system_prompt_file="ziva_cs.txt",
 )

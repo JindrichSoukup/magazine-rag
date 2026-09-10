@@ -1,25 +1,29 @@
-"""
-Naplň Chroma kolekci hotovými chunky a JIŽ SPOČÍTANÝMI embeddingy - vektory
-dodáváme sami (viz diskuze o "embedding jako vyměnitelná funkce"), takže se
-Chroma vůbec nedozví, jaký model/provider embeddingy spočítal.
+"""Fill a Chroma collection with the chunks and their ALREADY COMPUTED
+embeddings.
 
-POZOR na opakované spouštění nad stejnou --db-dir/--collection:
-  - Kolekce se plní přes upsert() (ne add()) - add() na existující ID mlčky
-    NIC neudělá (žádná chyba, ale ani se nic nepřepíše - ověřeno), takže
-    po přegenerování korpusu byste jinak dostávali staré výsledky, i když
-    embeddingy i chunky na disku jsou už nové. upsert() existující ID
-    correctně přepíše.
-  - upsert() ale neřeší situaci, kdy se ZMĚNÍ STRUKTURA chunků (jiné hranice
-    článků -> jiný počet chunků na článek -> některá stará chunk_id se už
-    vůbec nevygenerují) - takové osiřelé záznamy by v kolekci zůstaly
-    viset navždy a pořád by se vracely ve výsledcích. V tom případě použijte
-    --overwrite, ať se kolekce nejdřív smaže a založí načisto.
+We supply the vectors ourselves - see the note on keeping embedding an
+interchangeable function - so Chroma never learns which model or provider
+produced them.
 
-Použití:
-    python build_chroma.py \
-        --chunks output/ziva_embedding_chunks.jsonl \
-        --vectors output/ziva_embeddings__intfloat__multilingual-e5-base.npy \
-        --ids output/ziva_embeddings__intfloat__multilingual-e5-base_ids.json \
+CARE when running this repeatedly over the same --db-dir/--collection:
+  - The collection is filled through upsert(), not add(). add() on an
+    existing ID silently does NOTHING: no error, but nothing is
+    overwritten either (verified). After regenerating the corpus you
+    would otherwise keep getting the old results even though the chunks
+    and embeddings on disk are already new. upsert() overwrites an
+    existing ID correctly.
+  - upsert() does not, however, cope with a change in the STRUCTURE of
+    the chunks: different article boundaries mean a different number of
+    chunks per article, so some old chunk_ids are never generated again.
+    Such orphaned records would hang around in the collection forever
+    and keep coming back in results. Use --overwrite in that case, so
+    the collection is dropped and rebuilt from scratch.
+
+Usage:
+    python -m magrag.build_chroma \\
+        --chunks output/chunks.jsonl \\
+        --vectors output/ziva_embeddings__intfloat__multilingual-e5-base.npy \\
+        --ids output/ziva_embeddings__intfloat__multilingual-e5-base_ids.json \\
         --db-dir ./chroma_db --collection ziva --overwrite
 """
 import argparse
@@ -31,7 +35,7 @@ import numpy as np
 
 from magrag.console import setup_console
 
-BATCH_SIZE = 4000  # Chroma má interní limit na velikost jednoho add()/upsert() volání
+BATCH_SIZE = 4000  # Chroma caps the size of a single add()/upsert() call
 
 
 def load_chunks(path):
@@ -40,10 +44,13 @@ def load_chunks(path):
 
 
 def sanitize_metadata(chunk: dict) -> dict:
-    """Chroma přijímá v metadatech jen str/int/float/bool (žádné None,
-    žádné vnořené struktury) - tady se to sjednotí na bezpečné typy.
-    year/issue schválně převádíme na int (necháváme je ve zdrojových datech
-    jako string), ať jde později filtrovat i číselně ("year": {"$gt": 2020})."""
+    """Chroma accepts only str/int/float/bool in metadata - no None, no
+    nested structures - so everything is coerced to a safe type here.
+
+    year and issue are deliberately converted to int (the source data
+    keeps them as strings) so that they can later be filtered
+    numerically, e.g. {"year": {"$gt": 2020}}.
+    """
     return {
         "chunk_type": chunk["chunk_type"],
         "chunk_index": chunk["chunk_index"],
@@ -59,16 +66,18 @@ def sanitize_metadata(chunk: dict) -> dict:
 
 def main():
     setup_console()
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="load chunks and their vectors into Chroma")
     ap.add_argument("--chunks", required=True)
     ap.add_argument("--vectors", required=True)
     ap.add_argument("--ids", required=True)
-    ap.add_argument("--db-dir", required=True, help="kam Chroma uloží svá data na disk")
+    ap.add_argument("--db-dir", required=True,
+                    help="where Chroma stores its data on disk")
     ap.add_argument("--collection", default="ziva")
     ap.add_argument("--overwrite", action="store_true",
-                     help="smaž existující kolekci a založ ji znovu od nuly "
-                          "(použijte, když se změnila struktura chunků/článků, "
-                          "ne jen jejich obsah)")
+                    help="drop the existing collection and recreate it from "
+                         "scratch (use when the structure of the chunks or "
+                         "articles changed, not just their content)")
     args = ap.parse_args()
 
     chunks = load_chunks(args.chunks)
@@ -76,33 +85,35 @@ def main():
     ids = json.loads(Path(args.ids).read_text(encoding="utf-8"))
 
     assert len(chunks) == vectors.shape[0] == len(ids), (
-        f"počty nesedí: chunks={len(chunks)} vectors={vectors.shape[0]} ids={len(ids)}")
+        f"counts disagree: chunks={len(chunks)} vectors={vectors.shape[0]} "
+        f"ids={len(ids)}")
     assert all(c["chunk_id"] == i for c, i in zip(chunks, ids)), \
-        "pořadí ID v chunks a ve vectors/ids souboru nesedí"
+        "the order of IDs in chunks and in the vectors/ids file does not match"
 
     client = chromadb.PersistentClient(path=args.db_dir)
 
     existing = [c.name for c in client.list_collections()]
     if args.collection in existing and args.overwrite:
         client.delete_collection(args.collection)
-        print(f"Smazána stará kolekce '{args.collection}' (--overwrite).")
+        print(f"Dropped the old collection {args.collection!r} (--overwrite).")
         existing.remove(args.collection)
 
     if args.collection in existing:
         coll = client.get_collection(args.collection)
-        print(f"Kolekce '{args.collection}' už existuje ({coll.count()} položek) - "
-              f"chunky se přes upsert() doplní/přepíšou podle ID. Pokud se ale "
-              f"od minule změnila STRUKTURA chunků (jiné hranice článků), takhle "
-              f"se osiřelých starých záznamů nezbavíte - spusťte znovu s --overwrite.")
+        print(f"Collection {args.collection!r} already exists ({coll.count()} "
+              f"items) - chunks will be added or overwritten by ID through "
+              f"upsert(). But if the STRUCTURE of the chunks has changed "
+              f"since last time (different article boundaries), this will "
+              f"not clear the orphaned old records - rerun with --overwrite.")
     else:
         coll = client.create_collection(
             name=args.collection,
-            # naše vektory jsou už normalizované, ale takhle jsou vrácené
-            # "distance" hodnoty rovnou interpretovatelné jako kosinová
-            # vzdálenost (1 - kosinová podobnost), ne L2
+            # Our vectors are already normalised, but this makes the
+            # returned "distance" directly readable as cosine distance
+            # (1 - cosine similarity) rather than L2.
             metadata={"hnsw:space": "cosine"},
         )
-        print(f"Založena nová kolekce '{args.collection}'.")
+        print(f"Created a new collection {args.collection!r}.")
 
     n = len(chunks)
     for start in range(0, n, BATCH_SIZE):
@@ -113,12 +124,11 @@ def main():
             documents=[c["text"] for c in chunks[start:end]],
             metadatas=[sanitize_metadata(c) for c in chunks[start:end]],
         )
-        print(f"  upsertnuto {end}/{n}")
+        print(f"  upserted {end}/{n}")
 
-    print(f"\nHotovo. Kolekce '{args.collection}' obsahuje {coll.count()} "
-          f"položek (uloženo v {args.db_dir}).")
+    print(f"\nDone. Collection {args.collection!r} holds {coll.count()} "
+          f"items (stored in {args.db_dir}).")
 
 
 if __name__ == "__main__":
     main()
-

@@ -1,45 +1,45 @@
-"""
-Spočítej embeddingy pro všechny chunky v ziva_embedding_chunks.jsonl a ulož
-je na disk - dva soubory vedle sebe, propojené POŘADÍM (řádek N v .jsonl
-odpovídá řádku N v .npy):
+"""Compute embeddings for every chunk in chunks.jsonl and write them to
+disk as two files side by side, linked by ORDER (line N in the .jsonl
+corresponds to row N in the .npy):
 
-    ziva_embeddings__<model>.npy       - pole (n_chunks, dim), float32
-    ziva_embeddings__<model>_ids.json  - list chunk_id ve stejném pořadí
+    <profile>_embeddings__<model>.npy       - array (n_chunks, dim), float32
+    <profile>_embeddings__<model>_ids.json  - chunk_ids in the same order
 
-Embedduje se pole "embedding_text" (s metadata hlavičkou), ne holé "text" -
-viz diskuze o "contextual chunking".
+The "embedding_text" field is embedded (with its metadata header), not
+the bare "text" - see the note on contextual chunking in build_chunks.py.
 
-PRŮBĚŽNÉ UKLÁDÁNÍ (checkpointing)
-----------------------------------
-Na velkém archivu (desítky tisíc chunků) může výpočet na CPU trvat hodiny.
-Aby se dal běh bezpečně přerušit (Ctrl+C, pád, vypnutí počítače) a pak
-navázat tam, kde skončil, se místo "spočítej vše -> ulož najednou" dělá
-takhle:
+CHECKPOINTING
+-------------
+On a large archive of tens of thousands of chunks, the computation can
+take hours on a CPU. So that a run can be interrupted safely (Ctrl+C, a
+crash, the machine going down) and then resumed where it stopped, instead
+of "compute everything, save at the end" it works like this:
 
-  1. Vektory se průběžně zapisují do dočasného souboru <model>.raw přes
-     np.memmap - to je pole na disku, do kterého lze zapisovat po kouskách
-     bez nutnosti mít celý výsledek v paměti, a hlavně nezávisle na tom,
-     jestli proces doběhne až do konce.
-  2. Po každých --checkpoint-every chunků (výchozí 500) se do
-     <model>_progress.json zapíše, kolik je hotovo.
-  3. Když skript spustíte znovu se stejným --output-dir/--model, nejdřív
-     zkontroluje, jestli tam už rozdělaný běh je - a pokud ano, pokračuje
-     od posledního checkpointu místo od začátku.
-  4. Až je hotovo úplně vše, .raw soubor se převede na normální .npy
-     (přesně formát, jaký čekává zbytek pipeline/Chroma) a dočasné soubory
-     (.raw, _progress.json) se smažou.
+  1. Vectors are written as they go into a temporary <model>.raw file via
+     np.memmap - an on-disk array that can be written piecewise without
+     holding the whole result in memory, and crucially independent of
+     whether the process runs to completion.
+  2. Every --checkpoint-every chunks (500 by default), how much is done
+     is recorded in <model>_progress.json.
+  3. Run the script again with the same --output-dir and --model and it
+     first checks for a run in progress; if there is one, it continues
+     from the last checkpoint instead of starting over.
+  4. Once everything is done, the .raw file is converted into a normal
+     .npy - exactly the format the rest of the pipeline and Chroma
+     expect - and the temporary files (.raw, _progress.json) are removed.
 
-POZOR: checkpoint je platný jen pro STEJNÝ vstupní .jsonl (kontroluje se
-jen počet řádků, ne obsah) - pokud mezi přerušením a pokračováním vstupní
-soubor změníte (jiné pořadí/jiný obsah chunků), index by se rozjel. Necháno
-takhle kvůli jednoduchosti - běžně vstupní soubor mezi jedním "sedněte
-a spočítejte embeddingy" během neměníte.
+NOTE: a checkpoint is only valid for the SAME input .jsonl; only the line
+count is checked, not the content. Change the input file between the
+interruption and the resume - a different order or different chunks - and
+the indices would drift apart. Left this way for simplicity: one does not
+normally change the input between two sittings of "compute the
+embeddings".
 
-Použití:
-    python build_embeddings.py --input output/ziva_embedding_chunks.jsonl \\
+Usage:
+    python -m magrag.build_embeddings --input output/chunks.jsonl \\
         --output-dir output --model intfloat/multilingual-e5-base
 
-    # po přerušení stačí spustit úplně stejný příkaz znovu - naváže samo
+    # after an interruption, just run exactly the same command again
 """
 import argparse
 import json
@@ -61,12 +61,13 @@ def load_chunks(path: Path):
 
 
 def paths_for(out_dir: Path, model_name: str, prefix: str = "embeddings"):
-    """Jedno místo, kde se skládají všechna jména souborů - ať se výsledný
-    .npy/_ids.json, dočasný .raw i _progress.json vždycky shodují.
+    """One place where every filename is assembled, so that the final
+    .npy/_ids.json, the temporary .raw and _progress.json always agree.
 
-    `prefix` odděluje výstupy různých časopisů ve stejné složce; jméno
-    modelu je v názvu proto, aby šlo bez mazání porovnat víc kandidátů
-    (viz tools/compare_models.py).
+    `prefix` keeps different magazines' output apart in the same
+    directory; the model name is in the filename so that several
+    candidates can be compared without deleting anything (see
+    tools/compare_models.py).
     """
     slug = model_name.replace("/", "__")
     base = out_dir / f"{prefix}__{slug}"
@@ -79,7 +80,7 @@ def paths_for(out_dir: Path, model_name: str, prefix: str = "embeddings"):
 
 
 def format_eta(seconds: float) -> str:
-    if seconds == float("inf") or seconds != seconds:  # inf nebo NaN
+    if seconds == float("inf") or seconds != seconds:  # inf or NaN
         return "?"
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
@@ -88,14 +89,15 @@ def format_eta(seconds: float) -> str:
 
 def main():
     setup_console()
-    ap = argparse.ArgumentParser(description="spočítej embeddingy pro chunky")
+    ap = argparse.ArgumentParser(description="compute embeddings for the chunks")
     ap.add_argument("--input", required=True, help="chunks.jsonl")
-    ap.add_argument("--output-dir", required=True, help="kam uložit .npy a _ids.json")
+    ap.add_argument("--output-dir", required=True,
+                    help="where to write the .npy and _ids.json")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
-                     help="dávka pro samotný model.encode() (výpočetní jednotka)")
+                    help="batch for model.encode() itself (the compute unit)")
     ap.add_argument("--checkpoint-every", type=int, default=DEFAULT_CHECKPOINT_EVERY,
-                     help="po kolika chuncích průběžně uložit postup na disk")
+                    help="how many chunks between saving progress to disk")
     profiles.add_profile_argument(ap)
     args = ap.parse_args()
 
@@ -103,7 +105,7 @@ def main():
 
     chunks = load_chunks(Path(args.input))
     n = len(chunks)
-    print(f"Načteno {n} chunků z {args.input}")
+    print(f"Loaded {n} chunks from {args.input}")
 
     dim = embedding_dim(args.model)
     print(f"Model: {args.model} (dim={dim})")
@@ -113,25 +115,26 @@ def main():
     p = paths_for(out_dir, args.model, prefix=f"{profile.key}_embeddings")
 
     if p["npy"].exists():
-        print(f"{p['npy']} už existuje (hotovo z dřívějška) - nic nedělám. "
-              f"Smažte ho, pokud chcete přepočítat znovu.")
+        print(f"{p['npy']} already exists (finished earlier) - doing nothing. "
+              f"Delete it to recompute.")
         return
 
     texts = [c["embedding_text"] for c in chunks]
     ids = [c["chunk_id"] for c in chunks]
 
-    # --- najdi/založ checkpoint ------------------------------------------
+    # --- find or create a checkpoint -------------------------------------
     if p["progress"].exists() and p["raw"].exists():
         progress = json.loads(p["progress"].read_text(encoding="utf-8"))
         if progress.get("model") != args.model or progress.get("total") != n:
             raise SystemExit(
-                f"Rozjetý checkpoint v {p['raw'].name} neodpovídá aktuálnímu "
-                f"vstupu/modelu (byl pro model={progress.get('model')!r}, "
-                f"total={progress.get('total')}) - smažte {p['raw'].name} "
-                f"a {p['progress'].name}, nebo použijte jiné --output-dir."
+                f"The run in progress in {p['raw'].name} does not match the "
+                f"current input or model (it was for model="
+                f"{progress.get('model')!r}, total={progress.get('total')}) - "
+                f"delete {p['raw'].name} and {p['progress'].name}, or use a "
+                f"different --output-dir."
             )
         done = progress["done"]
-        print(f"Navazuji na předchozí běh: {done}/{n} chunků už hotovo.")
+        print(f"Resuming the previous run: {done}/{n} chunks already done.")
     else:
         done = 0
         mm_init = np.memmap(p["raw"], dtype="float32", mode="w+", shape=(n, dim))
@@ -139,18 +142,19 @@ def main():
         del mm_init
         p["ids"].write_text(json.dumps(ids, ensure_ascii=False), encoding="utf-8")
         p["progress"].write_text(
-            json.dumps({"model": args.model, "total": n, "done": 0}), encoding="utf-8")
+            json.dumps({"model": args.model, "total": n, "done": 0}),
+            encoding="utf-8")
 
     mm = np.memmap(p["raw"], dtype="float32", mode="r+", shape=(n, dim))
 
-    # --- hlavní smyčka: embeduj po checkpoint_every kouskách -------------
+    # --- main loop: embed in checkpoint_every sized pieces ---------------
     idx = done
     t0 = time.time()
     try:
         while idx < n:
             end = min(idx + args.checkpoint_every, n)
             vectors = embed(texts[idx:end], model_name=args.model, is_query=False,
-                             batch_size=args.batch_size, show_progress=False)
+                            batch_size=args.batch_size, show_progress=False)
             mm[idx:end] = vectors
             mm.flush()
             idx = end
@@ -161,22 +165,22 @@ def main():
             elapsed = time.time() - t0
             rate = (idx - done) / elapsed if elapsed > 0 else 0
             eta = (n - idx) / rate if rate > 0 else float("inf")
-            print(f"  {idx}/{n} hotovo ({rate:.2f} chunků/s, "
-                  f"zbývá odhadem {format_eta(eta)})")
+            print(f"  {idx}/{n} done ({rate:.2f} chunks/s, "
+                  f"about {format_eta(eta)} left)")
     except KeyboardInterrupt:
-        print(f"\nPřerušeno na {idx}/{n}. Checkpoint uložen - spusťte stejný "
-              f"příkaz znovu, naváže se odsud.")
+        print(f"\nInterrupted at {idx}/{n}. Checkpoint saved - run the same "
+              f"command again and it will carry on from here.")
         return
 
-    # --- hotovo: převeď dočasný .raw na normální .npy --------------------
-    final = np.array(mm)  # načte se do paměti - pro naše velikosti v pohodě
+    # --- finished: convert the temporary .raw into a normal .npy ---------
+    final = np.array(mm)  # read into memory - fine at our sizes
     del mm
     np.save(p["npy"], final)
     p["raw"].unlink()
     p["progress"].unlink()
 
-    print(f"Hotovo. Vektory: {p['npy']}  (shape={final.shape}, dtype={final.dtype})")
-    print(f"ID (stejné pořadí): {p['ids']}")
+    print(f"Done. Vectors: {p['npy']}  (shape={final.shape}, dtype={final.dtype})")
+    print(f"IDs (same order): {p['ids']}")
 
 
 if __name__ == "__main__":

@@ -213,6 +213,14 @@ class SourceProfile:
     unknown_author_label: str = "unknown"
 
     # --- answering ----------------------------------------------------------
+    # The citation printed above each block of retrieved context, and
+    # handed to the LLM so it can attribute what it says. Like the chunk
+    # header, its language follows the corpus rather than the code.
+    citation_template: str = (
+        "{title} ({journal} {year}/{issue}, {pages}), authors: {author}")
+    page_single_label: str = "p. {page}"
+    page_range_label: str = "pp. {start}-{end}"
+
     system_prompt_file: str = ""
 
     # --- derived (cache of compiled regexes) --------------------------------

@@ -1,19 +1,20 @@
-"""Dávkové zpracování celého archivu: PDF -> korpus článků -> chunky.
+"""Batch-process a whole archive: PDFs -> a corpus of articles -> chunks.
 
-Projde všechna PDF ve vstupní složce, na každé pustí celou extrakční část
-pipeline (extract_blocks -> create_toc -> build_page_map -> assign_articles)
-a nakonec z toho složí dva soubory pro embedding:
+Walks every PDF in the input directory, runs the whole extraction part of
+the pipeline on each (extract_blocks -> create_toc -> build_page_map ->
+assign_articles), and finally assembles two files for embedding:
 
-    <output>/corpus.json    - všechny články ze všech čísel pohromadě
-    <output>/chunks.jsonl   - chunky připravené k zaembeddování
+    <output>/corpus.json    - every article from every issue together
+    <output>/chunks.jsonl   - chunks ready to be embedded
 
-Mezivýsledky každého čísla zůstávají v `<output>/<rok>-<číslo>/` - hodí se
-při ladění, protože je z nich vidět, ve které fázi se co pokazilo.
+Each issue's intermediate results stay in `<output>/<year>-<issue>/`.
+They are useful when debugging, because they show which stage something
+went wrong in.
 
-Jak se PDF pojmenovávají, určuje `filename_pattern` v profilu zdroje
-(u Živy `ziva-RRRR-C.pdf`, u MagPi `MagPi<N>.pdf`).
+How the PDFs are named comes from `filename_pattern` in the source
+profile (`ziva-YYYY-N.pdf` for Živa, `MagPi<N>.pdf` for The MagPi).
 
-Použití:
+Usage:
     python -m magrag.run_all --profile ziva --input ./pdf --output ./output
     python -m magrag.run_all --profile magpi --input ./pdf --output ./output
 """
@@ -31,7 +32,7 @@ from magrag.extract_blocks import extract_pdf
 
 
 def find_issues(input_dir: Path, profile):
-    """Najdi všechna PDF odpovídající profilu a vrať je v pořadí vydání."""
+    """Find every PDF matching the profile and return them in issue order."""
     pattern = profile.filename_re
     found, skipped = [], []
     for path in sorted(input_dir.glob("*.pdf")):
@@ -39,17 +40,18 @@ def find_issues(input_dir: Path, profile):
         if not m:
             skipped.append(path.name)
             continue
-        # Profil může mít jednu skupinu (průběžné číslování) nebo dvě
-        # (ročník + číslo). Sjednotíme to na dvojici, ať zbytek pipeline
-        # nemusí řešit, který časopis to je.
+        # A profile may have one group (continuous numbering) or two
+        # (year plus issue). Normalise to a pair so the rest of the
+        # pipeline need not care which magazine this is.
         groups = m.groups()
         year, issue = (groups[0], groups[1]) if len(groups) >= 2 else ("", groups[0])
         found.append((year, issue, path))
     if skipped:
-        print(f"  [warn] {len(skipped)} PDF neodpovídá vzoru profilu "
-              f"{profile.key!r} ({profile.filename_pattern}), přeskakuji: "
-              + ", ".join(skipped[:5]) + (" ..." if len(skipped) > 5 else ""))
-    # číselné řazení, ať "MagPi9" nepředběhne "MagPi10"
+        print(f"  [warn] {len(skipped)} PDFs do not match the pattern of "
+              f"profile {profile.key!r} ({profile.filename_pattern}), "
+              f"skipping: " + ", ".join(skipped[:5])
+              + (" ..." if len(skipped) > 5 else ""))
+    # numeric sort, so that "MagPi9" does not come before "MagPi10"
     found.sort(key=lambda t: (_sort_key(t[0]), _sort_key(t[1])))
     return found
 
@@ -70,38 +72,41 @@ def process_one(pdf_path: Path, year: str, issue: str, out_dir: Path, profile):
         (out_dir / name).write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"[{label}] extrahuji bloky z {pdf_path.name} ...")
+    print(f"[{label}] extracting blocks from {pdf_path.name} ...")
     blocks = extract_pdf(str(pdf_path), profile)
     dump("blocks.json", blocks)
 
-    print(f"[{label}] tahám obsah čísla (TOC) ...")
+    print(f"[{label}] reading the contents page ...")
     toc = build_toc(str(pdf_path), profile)
     dump("toc.json", toc)
 
     page_map = build_page_map(blocks, profile)
     dump("page_map.json", page_map)
 
-    print(f"[{label}] skládám články z bloků ...")
+    print(f"[{label}] assembling articles from blocks ...")
     articles = assemble_articles(blocks, toc, page_map["label_to_page"], profile,
                                  year=year, issue=issue)
     dump("articles.json", articles)
 
     n_chunks = sum(len(a["chunks"]) for a in articles)
-    print(f"[{label}] hotovo: {len(articles)} článků, {n_chunks} bloků")
+    print(f"[{label}] done: {len(articles)} articles, {n_chunks} blocks")
     return articles
 
 
 def main():
     setup_console()
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--input", required=True, help="složka s PDF čísel časopisu")
-    ap.add_argument("--output", required=True, help="výstupní složka")
+    ap.add_argument("--input", required=True,
+                    help="directory holding the issues' PDFs")
+    ap.add_argument("--output", required=True, help="output directory")
     ap.add_argument("--skip-first", type=int, default=None,
-                    help="kolik stránek na začátku čísla ignorovat při "
-                         "chunkování (obálka); výchozí hodnota je v profilu")
+                    help="how many pages at the start of an issue to ignore "
+                         "when chunking (the cover); the default comes from "
+                         "the profile")
     ap.add_argument("--skip-last", type=int, default=None,
-                    help="kolik stránek na konci čísla ignorovat při "
-                         "chunkování (zadní obálka); výchozí hodnota je v profilu")
+                    help="how many pages at the end of an issue to ignore "
+                         "when chunking (the back cover); the default comes "
+                         "from the profile")
     profiles.add_profile_argument(ap)
     args = ap.parse_args()
 
@@ -111,7 +116,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     issues = find_issues(input_dir, profile)
-    print(f"Profil {profile.key!r}: nalezeno {len(issues)} čísel ke zpracování.")
+    print(f"Profile {profile.key!r}: found {len(issues)} issues to process.")
 
     all_articles = []
     failed = []
@@ -120,17 +125,19 @@ def main():
         try:
             all_articles.extend(
                 process_one(pdf_path, year, issue, issue_out_dir, profile))
-        except Exception as e:  # ať jedno rozbité číslo nezastaví celý archiv
-            print(f"  [CHYBA] {pdf_path.name}: {e!r}")
+        except Exception as e:  # one broken issue must not stop the archive
+            print(f"  [ERROR] {pdf_path.name}: {e!r}")
             failed.append(str(pdf_path))
 
     corpus_path = output_dir / "corpus.json"
     corpus_path.write_text(json.dumps(all_articles, ensure_ascii=False, indent=2),
                            encoding="utf-8")
 
-    skip_first = args.skip_first if args.skip_first is not None else profile.skip_first_pages
-    skip_last = args.skip_last if args.skip_last is not None else profile.skip_last_pages
-    print(f"\nSkládám chunky pro embedding (skip_first={skip_first}, "
+    skip_first = (args.skip_first if args.skip_first is not None
+                  else profile.skip_first_pages)
+    skip_last = (args.skip_last if args.skip_last is not None
+                 else profile.skip_last_pages)
+    print(f"\nBuilding chunks for embedding (skip_first={skip_first}, "
           f"skip_last={skip_last}) ...")
     all_chunks = []
     for article in all_articles:
@@ -144,16 +151,16 @@ def main():
         for c in all_chunks:
             f.write(json.dumps(c, ensure_ascii=False) + "\n")
 
-    print("\n=== Souhrn ===")
-    print(f"Zpracováno úspěšně: {len(issues) - len(failed)} / {len(issues)} čísel")
-    print(f"Celkem článků: {len(all_articles)}")
-    print(f"Celkem bloků v articles.json: "
+    print("\n=== Summary ===")
+    print(f"Processed successfully: {len(issues) - len(failed)} / {len(issues)} issues")
+    print(f"Articles in total: {len(all_articles)}")
+    print(f"Blocks in articles.json: "
           f"{sum(len(a['chunks']) for a in all_articles)}")
-    print(f"Celkem chunků pro embedding: {len(all_chunks)}")
-    print(f"Souhrnný korpus: {corpus_path}")
-    print(f"Embedding chunky: {chunks_path}")
+    print(f"Chunks for embedding: {len(all_chunks)}")
+    print(f"Combined corpus: {corpus_path}")
+    print(f"Embedding chunks: {chunks_path}")
     if failed:
-        print("Selhala tato čísla (podívej se na chybu výše a oprav ručně):")
+        print("These issues failed (see the error above and fix by hand):")
         for f in failed:
             print("  -", f)
 

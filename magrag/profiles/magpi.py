@@ -91,6 +91,8 @@ PROFILE = SourceProfile(
         "Text: {text}"
     ),
     unknown_author_label="unknown",
+    # No year: The MagPi numbers its issues continuously.
+    citation_template="{title} ({journal} {issue}, {pages}), authors: {author}",
 
     system_prompt_file="generic_en.txt",
 )

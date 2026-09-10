@@ -1,38 +1,40 @@
-"""
-Stage 5: nasekej ziva_corpus.json na chunky vhodné pro embedding.
+"""Stage 5: cut corpus.json into chunks suitable for embedding.
 
-Na rozdíl od "chunks" v articles.json (= jednotlivé bloky, extrémně
-nesourodá délka od "a" po pár set znaků) tenhle skript chunkuje
-article["full_text_paragraphs"]/["captions_paragraphs"] - čistý, souvislý
-text článku (bez popisků/annotací u full_text) rozdělený po odstavcích, KAŽDÝ
-SE SVOJÍ STRÁNKOU - na kusy s rozumně konzistentní velikostí (cílově
-~1200 znaků, s malým překryvem mezi chunky, ať se u hranice chunku
-neztratí kontext).
+Unlike the "chunks" in articles.json - individual blocks, wildly
+inconsistent in length from one character to a few hundred - this script
+chunks `article["full_text_paragraphs"]` and `["captions_paragraphs"]`:
+clean, continuous article text (with captions and annotations kept out of
+the body) split into paragraphs, EACH WITH ITS OWN PAGE, into pieces of
+reasonably consistent size. The target is ~1200 characters with a small
+overlap between chunks so that context is not lost at a chunk boundary.
 
-Proč zrovna odstavce se stránkami, a ne holý string (full_text)? Protože
-teprve TADY, na úrovni chunkování pro RAG, se rozhoduje, jestli se mají
-zahodit obálkové stránky na začátku/konci PDF (viz filter_cover_pages) -
-a k tomu je potřeba znát stránku KAŽDÉHO odstavce, ne jen to, kde článek
-podle TOC začíná a končí. Dřívější stránky pipeline (extract_blocks.py,
-assign_articles.py) žádné stránky nezahazují a nic neví o tom, co je
-"obálka" - to je čistě rozhodnutí na úrovni "jak dělám RAG", ne "jak
-digitalizuju PDF".
+Why paragraphs with pages rather than a plain string? Because it is HERE,
+at the level of chunking for RAG, that the decision is made whether to
+drop the cover pages at the start and end of the PDF (see
+filter_cover_pages) - and that needs the page of EVERY paragraph, not
+just where the article starts and ends according to the contents. The
+earlier stages (extract_blocks.py, assign_articles.py) discard no pages
+and know nothing about covers: that is purely a "how do I do RAG"
+decision, not a "how do I digitise a PDF" one.
 
-Ke každému chunku se přidá:
-  - strukturovaná metadata (year, issue, title, author, ...) jako
-    samostatná pole - pro filtrování a citaci zdroje
-  - "text" - čistý text chunku (na zobrazení / předání LLM jako kontext)
-  - "embedding_text" - text s metadata hlavičkou navíc ("Časopis: Živa
-    Ročník: ... Článek: ... Autoři: ... Text: ...") - tohle se posílá do
-    embedding modelu, protože osamocený chunk bez kontextu ("Mixotrofové
-    představují...") embedding modelu i LLM říká míň než s hlavičkou.
-  - unikátní "chunk_id" ("2014-6-1-chunk-0")
-  - "page_start"/"page_end" - PDF stránky, ze kterých chunk reálně pochází
-    (ne stránka celého článku - u dlouhého článku by to u pozdějších
-    chunků bylo zavádějící)
+Each chunk gets:
+  - structured metadata (year, issue, title, author, ...) as separate
+    fields, for filtering and for citing the source
+  - "text" - the plain chunk text, for display and for handing to the LLM
+    as context
+  - "embedding_text" - the text with a metadata header prepended
+    ("Magazine: ... Year: ... Article: ... Authors: ... Text: ..."). This
+    is what goes to the embedding model, because a lone chunk without
+    context ("Mixotrophs represent...") tells both the embedding model
+    and the LLM less than one with a header.
+  - a unique "chunk_id" ("2014-6-1-chunk-0")
+  - "page_start"/"page_end" - the PDF pages the chunk really came from,
+    not the pages of the whole article, which for a long article would be
+    misleading on the later chunks
 
-Použití:
-    python build_chunks.py --input output/ziva_corpus.json --output ziva_embedding_chunks.jsonl
+Usage:
+    python -m magrag.build_chunks --input output/corpus.json \\
+        --output output/chunks.jsonl
 """
 import argparse
 import json
@@ -43,26 +45,33 @@ from magrag import profiles
 from magrag.console import setup_console
 
 TARGET_CHARS = 1200
-# Poznámka k limitu 512 tokenů standardních BERT/XLM-R modelů (celá E5
-# rodina): řeší se to teď v embed.py (enforce_max_length) tak, že se ořízne
-# jen ten konkrétní text, co limit přesáhne - ne že by se kvůli vzácným
-# výjimkám preventivně zmenšovaly VŠECHNY chunky. Naměřeno na reálném
-# vzorku: TARGET_CHARS=1200 dávalo nejdelší embedding_text (chunk + metadata
-# hlavička) 1544 znaků == 510 tokenů u multilingual-e5-base - těsně pod
-# hranicí, ale u větších titulů/autorů v hlavičce se občas přesáhne.
+# On the 512-token limit of standard BERT/XLM-R models (the whole E5
+# family): it is handled in embed.py (enforce_max_length) by truncating
+# only the specific text that exceeds it, rather than shrinking ALL
+# chunks pre-emptively because of a rare exception. Measured on a real
+# sample: TARGET_CHARS=1200 produced a longest embedding_text (chunk plus
+# metadata header) of 1544 characters == 510 tokens under
+# multilingual-e5-base - just under the line, but a longer title or
+# author list in the header does occasionally push it over.
 OVERLAP_CHARS = 150
-MIN_CHUNK_CHARS = 200  # kratší poslední zbytek radši připoj k předchozímu chunku
+MIN_CHUNK_CHARS = 200  # a shorter final remainder is appended to the previous chunk
 
+# Czech capitals are in the class deliberately: this splits sentences in
+# the source language of the corpus, it is not prose.
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ])")
 
 
 def filter_cover_pages(paragraphs, total_pdf_pages, skip_first, skip_last):
-    """Vynech odstavce z prvních/posledních N stránek PDF (obálka, inzerce
-    příštího čísla apod.) - přesně tady, na úrovni chunkování pro RAG, se
-    má tahle volba dít (ne dřív v pipeline). Nejčastější dopad: poslední
-    článek v čísle mívá pdf_page_end až do úplně poslední strany PDF,
-    protože po něm už nic dalšího není v obsahu - a tahle poslední strana
-    bývá samostatná obálková fotka, co s článkem obsahově nesouvisí."""
+    """Drop paragraphs from the first and last N pages of the PDF - the
+    cover, the advertisement for the next issue and so on.
+
+    This is exactly where that choice belongs, at the level of chunking
+    for RAG, and not earlier in the pipeline. The commonest effect: the
+    last article in an issue tends to have a pdf_page_end running all the
+    way to the final PDF page, because nothing follows it in the
+    contents - and that final page is usually a standalone cover photo
+    with no relation to the article.
+    """
     if not paragraphs or not total_pdf_pages:
         return paragraphs
     lo, hi = skip_first, total_pdf_pages - skip_last
@@ -70,14 +79,17 @@ def filter_cover_pages(paragraphs, total_pdf_pages, skip_first, skip_last):
 
 
 def split_oversized_paragraph(page: int, text: str, limit: int):
-    """Když je jeden odstavec sám o sobě delší než limit (dlouhá citace,
-    ale taky třeba tabulka/výčet dat BEZ jediné tečky - viz níž), rozsekej
-    ho nejdřív po větách. Pokud ani jedna "věta" (== celý text, když není
-    žádná interpunkce k rozdělení) není kratší než limit, tvrdě ji rozsekej
-    po slovech - jinak by v chunku zůstal jeden obří kus přesahující limit
-    třeba 4x (přesně tenhle případ nastal u bloku s tabulkou dat bez teček:
-    "Kuno Pepino Bebe ... září leden únor ..."). Stránka se u všech
-    výsledných kusů zachová stejná jako u původního odstavce."""
+    """Split a paragraph that is longer than the limit on its own.
+
+    That happens with a long quotation, but also with a table or a data
+    listing containing NOT ONE full stop. Sentences are tried first. If
+    even a single "sentence" - which is the entire text when there is no
+    punctuation to split on - is still over the limit, it is split hard
+    on word boundaries; otherwise one enormous piece would stay in the
+    chunk at perhaps four times the limit. That case really occurred, in
+    a block of table data with no full stops. All resulting pieces keep
+    the page of the original paragraph.
+    """
     if len(text) <= limit:
         return [(page, text)]
 
@@ -110,16 +122,17 @@ def split_oversized_paragraph(page: int, text: str, limit: int):
 
 
 def _finalize_chunk(items):
-    """items: list of (page, text) -> {"page_start", "page_end", "text"}."""
+    """items: a list of (page, text) -> {"page_start", "page_end", "text"}."""
     pages = [p for p, _ in items]
     text = "\n\n".join(t for _, t in items)
     return {"page_start": min(pages), "page_end": max(pages), "text": text}
 
 
-def chunk_paragraphs(paragraphs, target_chars=TARGET_CHARS, overlap_chars=OVERLAP_CHARS):
-    """paragraphs: list of {"page": int, "text": str} (např. article's
-    full_text_paragraphs, případně už zbavené obálkových stránek).
-    Vrať list {"page_start", "page_end", "text"}."""
+def chunk_paragraphs(paragraphs, target_chars=TARGET_CHARS,
+                     overlap_chars=OVERLAP_CHARS):
+    """paragraphs: a list of {"page": int, "text": str} - an article's
+    full_text_paragraphs, optionally already stripped of cover pages.
+    Returns a list of {"page_start", "page_end", "text"}."""
     expanded = []
     for p in paragraphs:
         expanded.extend(split_oversized_paragraph(p["page"], p["text"], target_chars))
@@ -130,8 +143,8 @@ def chunk_paragraphs(paragraphs, target_chars=TARGET_CHARS, overlap_chars=OVERLA
     for page, text in expanded:
         if current and current_len + len(text) + 2 > target_chars:
             chunks.append(_finalize_chunk(current))
-            # překryv: vezmi z konce právě uzavřeného chunku tolik
-            # odstavců, kolik se vejde do overlap_chars
+            # overlap: take as many paragraphs off the end of the chunk
+            # just closed as fit into overlap_chars
             overlap, olen = [], 0
             for prev_page, prev_text in reversed(current):
                 if olen + len(prev_text) > overlap_chars:
@@ -145,7 +158,8 @@ def chunk_paragraphs(paragraphs, target_chars=TARGET_CHARS, overlap_chars=OVERLA
     if current:
         last = _finalize_chunk(current)
         if chunks and len(last["text"]) < MIN_CHUNK_CHARS:
-            # kratší zbytek (typicky jen překryv) radši připoj k předchozímu
+            # a short remainder, typically just the overlap, is better
+            # appended to the previous chunk than left standing alone
             chunks[-1]["text"] += "\n\n" + last["text"]
             chunks[-1]["page_end"] = last["page_end"]
         else:
@@ -154,8 +168,9 @@ def chunk_paragraphs(paragraphs, target_chars=TARGET_CHARS, overlap_chars=OVERLA
 
 
 def build_embedding_text(article: dict, chunk_text: str, profile) -> str:
-    """Text, který jde do embedding modelu: chunk s hlavičkou o tom, odkud
-    pochází. Šablonu i její jazyk určuje profil zdroje."""
+    """The text that goes to the embedding model: the chunk with a header
+    saying where it came from. Both the template and its language come
+    from the source profile."""
     return profile.chunk_header_template.format(
         journal=profile.journal_name,
         year=article["year"],
@@ -215,15 +230,16 @@ def build_chunks_for_article(article: dict, profile, skip_first=None,
 
 def main():
     setup_console()
-    ap = argparse.ArgumentParser(description="nasekej korpus na chunky pro embedding")
-    ap.add_argument("--input", required=True, help="corpus.json (z run_all.py)")
-    ap.add_argument("--output", required=True, help="výstupní .jsonl")
+    ap = argparse.ArgumentParser(
+        description="cut the corpus into chunks for embedding")
+    ap.add_argument("--input", required=True, help="corpus.json (from run_all.py)")
+    ap.add_argument("--output", required=True, help="output .jsonl")
     ap.add_argument("--skip-first", type=int, default=None,
-                     help="kolik stránek na začátku PDF čísla ignorovat (obálka); "
-                          "výchozí hodnota je v profilu")
+                    help="how many pages at the start of an issue to ignore "
+                         "(the cover); the default comes from the profile")
     ap.add_argument("--skip-last", type=int, default=None,
-                     help="kolik stránek na konci PDF čísla ignorovat (zadní obálka); "
-                          "výchozí hodnota je v profilu")
+                    help="how many pages at the end of an issue to ignore "
+                         "(the back cover); the default comes from the profile")
     profiles.add_profile_argument(ap)
     args = ap.parse_args()
 
@@ -243,7 +259,7 @@ def main():
 
     n_body = sum(1 for c in all_chunks if c["chunk_type"] == "body")
     n_caption = sum(1 for c in all_chunks if c["chunk_type"] == "caption")
-    print(f"{len(articles)} článků -> {len(all_chunks)} chunků "
+    print(f"{len(articles)} articles -> {len(all_chunks)} chunks "
           f"({n_body} body, {n_caption} caption) -> {args.output}")
 
 

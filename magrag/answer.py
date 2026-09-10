@@ -1,35 +1,40 @@
-"""Poslední fáze: z nalezeného kontextu nechej LLM složit odpověď s citacemi.
+"""The last stage: let an LLM compose an answer, with citations, from the
+retrieved context.
 
-Do téhle chvíle pipeline končila u vypsaného kontextu (`assemble_context.py`)
-a systémová instrukce ležela v souboru, který nikdo nečetl. Tenhle modul ten
-konec dopojí: vezme dotaz, pustí retrieval, poskládá prompt a odpověď
-odstreamuje.
+Until this module the pipeline stopped at printed context and the system
+prompt sat in a file nobody read. This connects that end: it takes a
+question, runs retrieval, assembles the prompt and streams the answer.
 
-Prompt má tři části a každá je jinde schválně:
+The prompt has three parts and each lives somewhere different on purpose:
 
-* **systémová instrukce** - v profilu zdroje (`profiles/prompts/*.txt`),
-  protože pravidla citování i jazyk odpovědi patří ke korpusu, ne k pipeline;
-* **kontext** - očíslované Zdroje z retrievalu, každý s plnou citací a
-  značkou, jestli jde o celý článek, nebo jen výřez;
-* **dotaz** - až úplně na konci, aby stabilní část promptu šla cachovat.
+* the **system prompt** lives in the source profile
+  (`profiles/prompts/*.txt`), because the citation rules and the language
+  of the answer belong to the corpus, not to the pipeline;
+* the **context** is the numbered sources from retrieval, each with a full
+  citation and a marker saying whether it is a whole article or an
+  excerpt;
+* the **question** comes last, so that the stable part of the prompt can
+  be cached.
 
-Model odpovídá **jen** z dodaných Zdrojů. To není zdvořilostní fráze
-v instrukci: bez uzemnění na citovatelný text je RAG jen drahý způsob, jak
-si nechat od jazykového modelu potvrdit vlastní domněnku.
+The model answers **only** from the supplied sources. That is not a
+politeness in the instruction: without grounding in citable text, RAG is
+just an expensive way to have a language model confirm your own guess.
 
-Použití:
+Usage:
     python -m magrag.answer --db-dir ./chroma_db --collection ziva \\
         --model intfloat/multilingual-e5-base \\
         --chunks output/chunks.jsonl --corpus output/corpus.json \\
-        --query "Jak se u nás šíří bolševník?"
+        --query "How is giant hogweed spreading here?"
 
-Bez `--query` se spustí interaktivní smyčka (index i model se načtou jen
-jednou). S `--dry-run` se vypíše hotový prompt a nic se nikam neposílá -
-hodí se na ladění retrievalu bez utrácení za tokeny.
+Without `--query` it runs an interactive loop, loading the index and the
+model once. With `--dry-run` it prints the finished prompt and sends
+nothing anywhere - useful for tuning retrieval without spending tokens.
 """
 import argparse
+import json
 import os
 import sys
+from pathlib import Path
 
 import chromadb
 
@@ -48,46 +53,47 @@ from magrag.assemble_context import (
 from magrag.console import setup_console
 from magrag.embed import embed
 
-# Claude Opus 5 - poslední generace, 1M kontextu. Odpovědi nad archivem
-# časopisu bývají delší souvislý text, ne jednořádková odpověď, proto
-# se streamuje a max_tokens je štědré.
+# Claude Opus 5 - latest generation, 1M context. Answers over a magazine
+# archive tend to be a longer piece of continuous prose rather than a
+# one-liner, hence streaming and a generous max_tokens.
 DEFAULT_LLM_MODEL = "claude-opus-5"
 DEFAULT_MAX_TOKENS = 8000
 
 
 def format_sources(blocks) -> str:
-    """Kontextové bloky -> očíslované "Zdroje" pro prompt.
+    """Context blocks -> the numbered "Sources" for the prompt.
 
-    Značka CELÝ ČLÁNEK / výřez tu není kosmetika - systémová instrukce se
-    na ni odvolává. U výřezu smí model přiznat, že úryvek začíná uprostřed
-    myšlenky; u celého článku by taková výhrada byla falešná opatrnost.
+    The FULL ARTICLE / excerpt marker is not decoration: the system
+    prompt refers to it. On an excerpt the model may admit that the
+    fragment starts mid-thought; on a whole article such a caveat would
+    be false caution.
     """
     parts = []
     for i, b in enumerate(blocks, 1):
-        tag = "CELÝ ČLÁNEK" if b["mode"] == "full_article" else "výřez"
-        parts.append(f"--- Zdroj {i} [{tag}] ---\n{b['citation']}\n\n{b['text']}")
+        tag = "FULL ARTICLE" if b["mode"] == "full_article" else "excerpt"
+        parts.append(f"--- Source {i} [{tag}] ---\n{b['citation']}\n\n{b['text']}")
     return "\n\n".join(parts)
 
 
 def build_prompt(question: str, blocks) -> str:
     if not blocks:
-        return (f"Otázka: {question}\n\n"
-                "Kontext: (retrieval nenašel žádné relevantní úryvky)")
-    return f"{format_sources(blocks)}\n\n---\n\nOtázka: {question}"
+        return (f"Question: {question}\n\n"
+                "Context: (retrieval found no relevant excerpts)")
+    return f"{format_sources(blocks)}\n\n---\n\nQuestion: {question}"
 
 
 def stream_answer(client, prompt: str, system_prompt: str, model: str,
                   max_tokens: int) -> str:
-    """Odstreamuj odpověď na stdout a vrať ji celou jako string."""
+    """Stream the answer to stdout and return it whole as a string."""
     with client.messages.stream(
         model=model,
         max_tokens=max_tokens,
         system=system_prompt,
         messages=[{"role": "user", "content": prompt}],
-        # Bezpečnostní klasifikátor může požadavek odmítnout (HTTP 200,
-        # stop_reason "refusal"). Serverový fallback přesměruje takový
-        # případ na jiný model podle kategorie, místo aby uživatel dostal
-        # prázdnou odpověď.
+        # A safety classifier may decline the request (HTTP 200,
+        # stop_reason "refusal"). The server-side fallback routes such a
+        # case to another model by category instead of leaving the user
+        # with an empty answer.
         betas=["server-side-fallback-2026-07-01"],
         fallbacks="default",
     ) as stream:
@@ -98,80 +104,79 @@ def stream_answer(client, prompt: str, system_prompt: str, model: str,
 
     if final.stop_reason == "refusal":
         detail = getattr(final, "stop_details", None)
-        print(f"\n[model požadavek odmítl: "
-              f"{getattr(detail, 'category', 'neuvedeno')}]", file=sys.stderr)
+        print(f"\n[the model declined the request: "
+              f"{getattr(detail, 'category', 'unspecified')}]", file=sys.stderr)
     elif final.stop_reason == "max_tokens":
-        print(f"\n[odpověď byla uříznuta na {max_tokens} tokenech - "
-              f"zvyšte --max-tokens]", file=sys.stderr)
+        print(f"\n[the answer was cut off at {max_tokens} tokens - raise "
+              f"--max-tokens]", file=sys.stderr)
     return "".join(b.text for b in final.content if b.type == "text")
 
 
 def make_client():
-    """Vytvoř klienta Anthropic API, nebo srozumitelně vysvětli, co chybí."""
+    """Build an Anthropic API client, or explain clearly what is missing."""
     try:
         import anthropic
     except ImportError:
         raise SystemExit(
-            "Chybí balíček 'anthropic' (pip install anthropic). Retrieval "
-            "jde zkoušet i bez něj - použijte --dry-run.")
+            "The 'anthropic' package is missing (pip install anthropic). "
+            "Retrieval can still be tried without it - use --dry-run.")
     if not (os.environ.get("ANTHROPIC_API_KEY")
             or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
-        print("[pozor] není nastavený ANTHROPIC_API_KEY; klient zkusí "
-              "přihlášení uložené příkazem 'ant auth login'.", file=sys.stderr)
+        print("[note] ANTHROPIC_API_KEY is not set; the client will try the "
+              "credentials stored by 'ant auth login'.", file=sys.stderr)
     return anthropic.Anthropic()
 
 
 def main():
     setup_console()
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--db-dir", required=True, help="složka s Chroma databází")
+    ap.add_argument("--db-dir", required=True, help="directory of the Chroma database")
     ap.add_argument("--collection", default="ziva")
     ap.add_argument("--model", required=True, help="embedding model (retrieval)")
     ap.add_argument("--chunks", required=True, help="chunks.jsonl")
     ap.add_argument("--corpus", required=True, help="corpus.json")
     ap.add_argument("--query", default=None,
-                    help="jednorázový dotaz; bez něj interaktivní smyčka")
+                    help="a one-off question; without it an interactive loop runs")
     ap.add_argument("--top-n", type=int, default=DEFAULT_TOP_N)
     ap.add_argument("--window", type=int, default=DEFAULT_WINDOW)
     ap.add_argument("--promote-threshold", type=int,
                     default=DEFAULT_PROMOTE_THRESHOLD)
     ap.add_argument("--llm-model", default=DEFAULT_LLM_MODEL,
-                    help=f"model pro generování odpovědi (výchozí {DEFAULT_LLM_MODEL})")
+                    help=f"model used to generate the answer "
+                         f"(default {DEFAULT_LLM_MODEL})")
     ap.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     ap.add_argument("--dry-run", action="store_true",
-                    help="vypiš hotový prompt a skonči; nic se neposílá do API")
+                    help="print the finished prompt and stop; nothing is sent "
+                         "to the API")
     profiles.add_profile_argument(ap)
     args = ap.parse_args()
 
     profile = profiles.get(args.profile)
     system_prompt = profile.system_prompt()
 
-    print("Nahrávám chunky, korpus a embedding model ...")
-    import json
-    from pathlib import Path
-
+    print("Loading chunks, corpus and the embedding model ...")
     chunks = load_jsonl(args.chunks)
     corpus = json.loads(Path(args.corpus).read_text(encoding="utf-8"))
     body_sequences = build_body_sequences(chunks)
     corpus_index = build_corpus_index(corpus)
 
     coll = chromadb.PersistentClient(path=args.db_dir).get_collection(args.collection)
-    embed(["zahřívací dotaz"], model_name=args.model, is_query=True,
+    embed(["warm-up query"], model_name=args.model, is_query=True,
           show_progress=False)
-    print(f"Připraveno ({coll.count()} chunků, {len(corpus)} článků, "
-          f"profil {profile.key!r}).\n")
+    print(f"Ready ({coll.count()} chunks, {len(corpus)} articles, "
+          f"profile {profile.key!r}).\n")
 
     client = None if args.dry_run else make_client()
 
     def handle(question: str):
         hits = run_search(coll, args.model, question, args.top_n)
-        blocks = assemble_context(hits, corpus_index, body_sequences,
+        blocks = assemble_context(hits, corpus_index, body_sequences, profile,
                                   args.window, args.promote_threshold)
         prompt = build_prompt(question, blocks)
         n_tokens = count_tokens(system_prompt) + count_tokens(prompt)
-        print(f"[{len(blocks)} zdrojů, ~{n_tokens} tokenů promptu]\n")
+        print(f"[{len(blocks)} sources, ~{n_tokens} prompt tokens]\n")
         if args.dry_run:
-            print(f"=== SYSTÉMOVÁ INSTRUKCE ===\n{system_prompt}\n")
+            print(f"=== SYSTEM PROMPT ===\n{system_prompt}\n")
             print(f"=== PROMPT ===\n{prompt}")
             return
         stream_answer(client, prompt, system_prompt, args.llm_model,
@@ -181,10 +186,10 @@ def main():
         handle(args.query)
         return
 
-    print("Interaktivní režim; prázdný řádek nebo Ctrl+C ukončí.\n")
+    print("Interactive mode; an empty line or Ctrl+C ends the session.\n")
     while True:
         try:
-            question = input("Dotaz> ").strip()
+            question = input("Question> ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
