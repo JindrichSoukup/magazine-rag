@@ -136,31 +136,43 @@ kde je obsah čísla, ani co stojí v patičce.
 
 | | ruční `ziva` | adaptivní |
 |---|---|---|
-| nalezené články | 37 | 36 |
-| shodné titulky | — | 36 z 36 |
-| bajtově shodný text článku | — | 19 z 36 |
-| články s `quality_flags` | 3 | 3 |
+| nalezené články | 37 | 37 |
+| titulek obsažen v adaptivním | — | 36 z 37 |
+| bajtově shodný text článku | — | 20 z 37 |
+| články s `quality_flags` | 3 | 4 |
 
-Jeden článek chybí, protože se nepodařilo namapovat jeho tištěné číslo
-stránky. Zbylé rozdíly v textu jsou hranice odstavců, ne ztracený obsah.
+Adaptivní profil najde tytéž články. Jeho titulky jsou ale delší: obsahují
+i řádek s autorem, protože obecný profil nemůže vědět, že obsah čísla
+autory uvádí zvlášť a odděluje je barvou. Rozdíly v textu článků jsou
+hranice odstavců, ne ztracený obsah.
 
 ### Ověřeno na druhém časopise
 
 Profil `magpi` je otestovaný na třech reálných číslech stažených z
 `magpi.raspberrypi.com/issues` (150, 152, 155; born-digital PDF, 132 stran).
-Bez jediné ručně zadané hodnoty o sazbě z nich pipeline vytáhne **92 článků
-a 674 chunků**. Cesta k tomu číslu ukázala tři chyby, které byly na Živě
-neviditelné:
+Bez jediné ručně zadané hodnoty o sazbě z nich pipeline vytáhne **85 článků
+a 656 chunků**, bez duplicit a bez vymyšlených autorů.
+
+Nebylo to zadarmo. Cesta k tomu číslu ukázala pět chyb, které byly na Živě
+neviditelné, a **žádná z nich nespadla** — pipeline pokaždé doběhla a vypsala
+spokojený souhrn:
 
 | Nález | Proč to Živa nikdy neukázala |
 |---|---|
 | obsah čísla uvádí `032`, patička `32` | Živa čísla stránek nedoplňuje nulami |
 | titulky nesou řídicí znak `U+0007` | ozdobná odrážka sázená symbolovým fontem |
+| číslo položky je slepené s tabulátorem a odrážkou | totéž |
 | obsah je rozložený přes tři stránky | Živa má obsah vždy na jedné |
+| na stránce s obsahem jsou troje různá čísla | Živa ozdobné upoutávky nemá |
 
-Každá z nich se projevila **tiše**: nic nespadlo, jen jich pipeline našla
-10 místo 92. Přesně proto stojí za to přenést pipeline na druhý zdroj, i když
-na tom prvním funguje.
+Poslední z nich je nejzajímavější. Vedle skutečných čísel stránek stojí
+v obsahu MagPi ozdobné upoutávky (velké bílé číslo s krátkým popiskem)
+a číslo samotné stránky s obsahem v patičce. Napevno zadat, které je které,
+nejde: MagPi mezi čísly 150 a 152 předělal grafiku včetně fontů, velikostí
+i formátu čísel. Řeší se to stejnou úvahou jako klasifikace bloků, jen
+o patro výš — hledá se **nejčastější dvojice „styl čísla + styl titulku
+hned za ním"**, protože obsah je seznam a ta dvojice se v něm opakuje
+u každé položky.
 
 ### Přidání nového časopisu
 

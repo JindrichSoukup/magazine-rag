@@ -79,3 +79,64 @@ def test_no_toc_at_all_returns_nothing(monkeypatch):
     stránku - volající to pozná a může zafixovat --toc-page ručně."""
     assert _find([1, 2, 1, 0, 3, 0, 0, 2], monkeypatch) == ()
     assert TOC_MIN_ENTRIES > 3
+
+
+# --- odvození stylů položek ze stránky s obsahem ---------------------------
+
+def _span(text, font, size, color=0):
+    return {"text": text, "font": font, "size": size, "color": color}
+
+
+def _entries(number_font, number_size, text_font, text_size, n, start=10):
+    """n položek obsahu vysázených zadaným stylem."""
+    out = []
+    for i in range(n):
+        out.append(_span(str(start + i * 2), number_font, number_size))
+        out.append(_span(f"Titulek {i}", text_font, text_size))
+    return out
+
+
+def test_two_equally_valid_number_styles_are_both_kept():
+    """Živa má v obsahu dvě velikosti čísel (9 a 10 b) a obě jsou pravé.
+    Vzít jen tu nejčastější znamená ztratit polovinu položek - což se při
+    vývoji taky stalo."""
+    from magrag.create_toc import detect_entry_styles
+    spans = (_entries("MeliorCE-Bold", 9.0, "MeliorCE", 9.5, 19)
+             + _entries("MeliorCE-Bold", 10.0, "MeliorCE", 10.0, 15, start=200))
+    numbers, texts = detect_entry_styles(spans, profile=None)
+    assert numbers == {("MeliorCE", 9.0), ("MeliorCE", 10.0)}
+    assert texts == {("MeliorCE", 9.5), ("MeliorCE", 10.0)}
+
+
+def test_decorative_callout_numbers_are_rejected():
+    """MagPi má na stránce s obsahem ozdobné upoutávky: velké bílé číslo
+    s kratším popiskem. Vypadají jako položka, ale vedou na jiný druh
+    textu a je jich řádově míň."""
+    from magrag.create_toc import detect_entry_styles
+    spans = (_entries("RobotoSerif-20ptRegular", 8.5, "RobotoSerif-20ptRegular", 8.5, 32)
+             + _entries("Roboto-Bold", 12.0, "Roboto-Black", 12.0, 3, start=90))
+    numbers, texts = detect_entry_styles(spans, profile=None)
+    assert numbers == {("RobotoSerif", 8.5)}
+    assert texts == {("RobotoSerif", 8.5)}
+
+
+def test_number_and_title_may_use_different_fonts():
+    """U MagPi 150 je číslo Rajdhani a titulek RobotoSlab - styl textu se
+    proto hledá zvlášť, ne jako 'stejná rodina jako číslo'."""
+    from magrag.create_toc import detect_entry_styles
+    spans = _entries("Rajdhani-Bold", 14.0, "RobotoSlab-Light", 11.0, 22)
+    numbers, texts = detect_entry_styles(spans, profile=None)
+    assert numbers == {("Rajdhani", 14.0)}
+    assert texts == {("RobotoSlab", 11.0)}
+
+
+def test_page_without_any_numbers_yields_no_styles():
+    from magrag.create_toc import detect_entry_styles
+    spans = [_span("jen text", "Whatever", 10.0)]
+    assert detect_entry_styles(spans, profile=None) == (None, None)
+
+
+def test_page_number_survives_a_tab_and_a_decorative_glyph():
+    """U MagPi 150 přichází číslo položky slepené s tabulátorem a odrážkou
+    do jednoho spanu. Bez pročištění se položka ztratí beze stopy."""
+    assert page_span_value("10 \t \x07") == "10"

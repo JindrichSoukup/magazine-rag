@@ -45,9 +45,18 @@ PROFILE = SourceProfile(
     # "MagPi155.pdf", "The-MagPi-155.pdf", "MagPi-155.pdf", "magpi_155.pdf"
     filename_pattern=r"(?:the[-_ ]?)?magpi[-_ ]?(\d{1,3})\.pdf$",
 
-    # Obsah čísla nebývá vždy na téže straně (mění se rozsah úvodní inzerce),
-    # takže se hledá - viz create_toc.find_toc_pages.
+    # Obsah čísla nebývá vždy na téže straně (mění se rozsah úvodní inzerce)
+    # a bývá rozložený přes dvě až tři stránky - viz create_toc.find_toc_pages.
     toc_page_indices=(),
+    # Styly položek obsahu se odvozují ze stránky samotné. MagPi mezi čísly
+    # 150 a 152 předělal grafiku: změnily se fonty (Rajdhani/RobotoSlab ->
+    # Roboto*), velikosti i formát čísel stránek ("22" -> "032"). Napevno
+    # zadané hodnoty by tedy platily jen pro část archivu a na zbytku by
+    # tiše vyrobily nesmysly. Viz create_toc.detect_entry_styles.
+    toc_adaptive_styles=True,
+    # Obsah MagPi u položek autory neuvádí. Kdyby se titulek přesto dělil,
+    # jako autor by vyšel název rubriky ("Tutorials", "Project Showcase").
+    toc_has_authors=False,
 
     # Patička MagPi obsahuje jen číslo stránky, na obsah se chytit nedá.
     footer_detection="position",

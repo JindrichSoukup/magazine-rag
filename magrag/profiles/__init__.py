@@ -111,9 +111,22 @@ class SourceProfile:
     # --- obsah čísla --------------------------------------------------------
     # 0-indexované PDF stránky, na kterých je natištěný obsah čísla.
     toc_page_indices: tuple[int, ...] = (2,)
-    # Font čísla stránky v obsahu (prefix jména fontu + požadavek na tučnost).
+    # Font čísla stránky v obsahu (prefix jména fontu + požadavek na
+    # tučnost). `toc_page_number_bold=None` znamená "na řezu nezáleží".
     toc_page_number_prefixes: tuple[str, ...] = ()
-    toc_page_number_bold: bool = True
+    toc_page_number_bold: Optional[bool] = None
+
+    # Odvoď si styly položek obsahu ze stránky samotné, místo abys je bral
+    # z nastavení výše. Zapíná se u časopisu, kde konkrétní jména fontů
+    # neznáme nebo se v průběhu archivu mění (MagPi mezi čísly 150 a 152
+    # předělal grafiku včetně fontů i formátu čísel stránek). Podrobně
+    # viz create_toc.detect_entry_styles().
+    toc_adaptive_styles: bool = False
+
+    # Uvádí obsah čísla u položek autory? Živa ano (a odděluje je barvou),
+    # MagPi ne. Když ne, nemá smysl titulek dělit - jinak se jako autor
+    # vyrobí kus titulku nebo název rubriky.
+    toc_has_authors: bool = True
     # Řetězce, které se v obsahu objevují jako tiráž/copyright. `drop`
     # ořízne titulek od výskytu dál (zbytek řádku je tiráž nalepená na
     # poslední položku), `skip_span` zahodí celý span (samostatný řádek
@@ -267,10 +280,11 @@ class SourceProfile:
         return None
 
     def is_toc_page_number_font(self, font: str) -> bool:
-        if not self.toc_page_number_prefixes:
-            return True
-        if not any(font.startswith(p) for p in self.toc_page_number_prefixes):
+        if self.toc_page_number_prefixes and not any(
+                font.startswith(p) for p in self.toc_page_number_prefixes):
             return False
+        if self.toc_page_number_bold is None:
+            return True
         return ("Bold" in font) == self.toc_page_number_bold
 
     def system_prompt(self) -> str:

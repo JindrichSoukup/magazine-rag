@@ -46,8 +46,26 @@ CAPTION_LEAD_MIN_CHARS = 20
 # Jméno fontu v PDF chodí jako "ABCDEF+MeliorCE-Bold" (šestipísmenný subset
 # prefix + rodina + řez) nebo "Arial,BoldItalic". Rodina je to, co zbude.
 SUBSET_PREFIX_RE = re.compile(r"^[A-Z]{6}\+")
-STYLE_SUFFIX_RE = re.compile(r"[-,](?:Bold|Italic|Oblique|Light|Medium|Regular|Roman|Semibold|Black|Condensed)+.*$",
-                             re.IGNORECASE)
+# Za pomlčkou může stát ještě optická velikost ("RobotoSerif-20ptRegular"),
+# než přijde vlastní řez. Bez ní by "RobotoSerif-20ptRegular" a
+# "RobotoSerif-Italic" vyšly jako dvě různé rodiny, i když jde o tentýž
+# text v jiném řezu - a v obsahu čísla by se pak kurzívou vysázená část
+# titulku zahodila jako cizí styl.
+STYLE_SUFFIX_RE = re.compile(
+    r"[-,](?:\d+pt)?"
+    r"(?:Bold|Italic|Oblique|Light|Medium|Regular|Roman|Semibold|SemiBold"
+    r"|Black|Thin|ExtraBold|Condensed)+.*$",
+    re.IGNORECASE)
+
+
+def font_style_key(font: str, size: float):
+    """Rodina písma + velikost zaokrouhlená na půlbody.
+
+    Jednotka, ve které se porovnává "je tohle tentýž druh textu?".
+    Zaokrouhlení je nutné, protože PDF běžně vysází tentýž text jako 8.5
+    i 8.502 a bez něj by se jeden styl rozpadl na několik.
+    """
+    return font_family(font), round(size * 2) / 2
 
 
 def font_family(font: str) -> str:

@@ -72,8 +72,14 @@ PROFILE = SourceProfile(
     default_block_type="body",
 
     # Bez znalosti konkrétního časopisu se obsah čísla nehledá na pevné
-    # stránce, ale detekcí (viz create_toc.find_toc_pages).
+    # stránce, ale detekcí (viz create_toc.find_toc_pages), a styly jeho
+    # položek se odvodí ze stránky samotné (detect_entry_styles).
     toc_page_indices=(),
+    toc_adaptive_styles=True,
+    # Jestli obsah uvádí autory, se od stolu nepozná. Nedělit je bezpečnější:
+    # chybějící autor je prázdné pole, kdežto špatně rozdělený titulek je
+    # poškozený titulek i vymyšlený autor zároveň.
+    toc_has_authors=False,
 
     skip_first_pages=2,
     skip_last_pages=2,

@@ -58,6 +58,7 @@ PROFILE = SourceProfile(
     toc_page_indices=(2,),
     toc_page_number_prefixes=("MeliorCE",),
     toc_page_number_bold=True,
+    toc_has_authors=True,   # obsah uvádí autory a odděluje je barvou spanu
     toc_drop_markers=(
         "© Nakladatelství Academia",
         "SSČ AV ČR",

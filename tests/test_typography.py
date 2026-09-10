@@ -152,3 +152,28 @@ def test_adaptive_without_stats_fails_loudly():
     v korpusu pozná až za tři fáze."""
     with pytest.raises(ValueError):
         classify_block(ADAPTIVE, "text", "BodyFont", 10.0)
+
+
+# --- optická velikost ve jménu fontu ---------------------------------------
+
+def test_optical_size_in_the_font_name_is_not_part_of_the_family():
+    """"RobotoSerif-20ptRegular" a "RobotoSerif-Italic" je tentýž text
+    v jiném řezu. Kdyby vyšly jako dvě rodiny, kurzívou vysázená část
+    titulku v obsahu by se zahodila jako cizí styl."""
+    assert font_family("RobotoSerif-20ptRegular") == "RobotoSerif"
+    assert font_family("RobotoSerif-20ptRegular") == font_family("RobotoSerif-Italic")
+
+
+def test_similar_family_names_stay_apart():
+    """Roboto, RobotoSerif, RobotoSlab a RobotoMono jsou čtyři různé
+    rodiny - u MagPi je podle nich vidět rozdíl mezi položkou obsahu,
+    názvem rubriky a patičkou."""
+    families = {font_family(f) for f in
+                ("Roboto-Black", "RobotoSerif-Italic", "RobotoSlab-Light",
+                 "RobotoMono-Light", "RobotoCondensed-Light")}
+    assert len(families) == 5
+
+
+def test_font_style_key_buckets_to_half_points():
+    from magrag.typography import font_style_key
+    assert font_style_key("Roboto-Bold", 8.51) == font_style_key("Roboto", 8.49)

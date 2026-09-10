@@ -250,3 +250,62 @@ pravidlo.
 
 Regrese na Živě prošla po každé z těchhle změn: `blocks`, `toc`, `page_map`,
 `articles` i `chunks` zůstávají bajtově shodné.
+
+---
+
+## Fáze 10 — Duplicitní záznamy a vymyšlení autoři u MagPi
+
+Dvě zbylé vady z předchozí fáze. Obě vedly na tutéž příčinu: obsah čísla
+se četl podle pravidel ušitých na Živu, i když u MagPi platí jiná.
+
+**Co na stránce s obsahem MagPi vlastně stojí.** Nejsou tam jeden, ale
+**tři různé druhy čísel**, a jen jeden z nich jsou položky obsahu:
+
+1. skutečná čísla stránek (u 155 `RobotoSerif` 8,5 b černě, u 150
+   `Rajdhani` 14 b),
+2. ozdobné upoutávky — velké bílé číslo s krátkým popiskem, vysázené do
+   barevné plochy,
+3. číslo samotné stránky s obsahem v běžící patičce.
+
+Druhy 2 a 3 zakládaly falešné položky, které pak v korpusu vypadaly jako
+duplicity („Contents", „Top Projects", tentýž článek dvakrát).
+
+**Proč to nešlo zapsat do profilu.** MagPi mezi čísly 150 a 152 předělal
+grafiku: změnily se fonty (`Rajdhani`/`RobotoSlab` → `Roboto*`), velikosti
+i formát čísel (`22` → `032`). Jedna sada napevno zadaných hodnot by
+platila jen na část archivu a na zbytku by tiše vyrobila nesmysly.
+
+**Řešení: stejná úvaha jako u klasifikace bloků, jen o patro výš.** Obsah
+je seznam, takže se v něm **dvojice „styl čísla + styl titulku hned za
+ním"** opakuje u každé položky. Nejčastější taková dvojice je z definice
+ta pravá; ozdobná upoutávka vede na jiný druh textu a je jí řádově míň.
+Měřeno na reálných datech je rozestup pohodlný — u Živy má druhá pravá
+dvojice 79 % četnosti první, u MagPi má první ozdobná upoutávka 14 %.
+
+Dvě iterace, obě poučné:
+
+- **První verze brala jen jeden nejčastější styl čísla.** Na MagPi to
+  fungovalo, na Živě spadl počet článků z 37 na 23 — Živa má v obsahu dvě
+  rovnocenné velikosti čísel (9 a 10 b) a polovina položek se ztratila.
+  Bez porovnání s druhým časopisem by se to nepoznalo.
+- **Druhá verze brala jen jeden nejčastější styl textu.** Táž chyba
+  o krok dál: Živa míchá i velikosti titulků. Až práh na četnost celé
+  dvojice, ne na jednotlivý styl, sedí na obojí.
+
+**Autoři.** Rozdělení titulku a autora podle barvy prvního spanu je ryze
+živovská věc. Obsah MagPi autory neuvádí vůbec, takže se jako autor
+vyráběl název rubriky („Tutorials", „Project Showcase"). Nové pole
+`toc_has_authors` to vypíná. U adaptivního profilu je vypnuté taky, a to
+záměrně: chybějící autor je prázdné pole, kdežto špatně rozdělený titulek
+je poškozený titulek **a** vymyšlený autor zároveň.
+
+**Vedlejší oprava:** `font_family()` neuměla optickou velikost ve jménu
+fontu, takže `RobotoSerif-20ptRegular` a `RobotoSerif-Italic` vycházely
+jako dvě různé rodiny. Kurzívou vysázená část titulku se pak zahazovala
+jako cizí styl.
+
+**Výsledek.** MagPi: 85 článků ze tří čísel, žádná duplicitní stránka,
+žádný vymyšlený autor. Živa přes adaptivní profil: 37 článků, tedy přesně
+tolik co ruční profil (dřív 36), a 36 z 37 titulků ručního profilu je
+doslova obsaženo v adaptivních. Regrese ručního profilu zůstává bajtově
+shodná.
