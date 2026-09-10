@@ -5,15 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "magrag"
 version = "0.2.0"
-description = "PDF archiv časopisu -> strukturovaný korpus -> RAG, s vyměnitelnými profily zdroje"
+description = "A magazine PDF archive -> structured corpus -> RAG, with swappable source profiles"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "Jindřich Soukup" }]
 
-# Runtime závislosti jsou schválně jen ty pro extrakci z PDF - kdo chce
-# zkoumat parsování, nemusí stahovat dvougigový torch. Zbytek je v extras
-# a se zamčenými verzemi v requirements.txt.
+# Runtime dependencies are deliberately only those for PDF extraction:
+# anyone who wants to study the parsing need not download two gigabytes
+# of torch. The rest is in extras, and pinned in requirements.txt.
 dependencies = ["PyMuPDF>=1.25"]
 
 [project.optional-dependencies]

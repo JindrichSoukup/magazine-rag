@@ -1,311 +1,537 @@
-# Živa RAG Pipeline — deník projektu
+# Živa RAG pipeline — project log
 
-Digitalizace archivu časopisu **Živa** (Nakladatelství Academia) do strukturovaného korpusu vhodného pro RAG (retrieval-augmented generation): od syrových PDF, přes parsování článků, chunking, embeddingy, vektorové úložiště, až po strategii vyhledávání pro LLM.
+Digitising the archive of the Czech natural-history magazine **Živa**
+(Nakladatelství Academia) into a structured corpus suitable for RAG
+(retrieval-augmented generation): from raw PDFs through article parsing,
+chunking, embeddings and a vector store to a retrieval strategy for an
+LLM.
 
-Rozsah: 75 čísel, 2 941 článků, ~60 500 chunků (bloky), ~35 000 embedding chunků.
-
----
-
-## Fáze 1 — Extrakce bloků z PDF (`extract_blocks.py`)
-
-**Cíl:** dostat z PDF (fitz/PyMuPDF) strukturované textové bloky se stránkou, typem, fontem a pozicí.
-
-- Rekonstrukce chybějícího extrakčního skriptu na základě dochovaných výstupů (`ziva_blocks.json`, `ziva_toc.json`) a vzorového PDF.
-- Heuristická klasifikace typu bloku (`title`/`heading`/`other`/`body`/`caption`/`annotation`) podle fontu a velikosti — vyladěno konkrétně na sazbu Živy (MeliorCE = patkové tělo textu/titulky, HelveticaCE/Arial = bezpatkové popisky/patičky).
-- **Oprava — zalomení slov přes pomlčku:** zarovnaný text v InDesignu láme slova na konci řádku pomlčkou ("dlouhodo- bé"). Přidána `smart_join()` s detekcí (písmeno + pomlčka na konci + pokračování malým písmenem), aplikovaná při skládání řádků *i* při slévání sousedních bloků na téže stránce.
-- **Rozlišení `annotation` vs. `caption`:** panelové značky/měřítka nalepené na obrázek (`a`, `b`, `1 cm`, řady čísel na ose grafu) nenesou obsah — nový typ `annotation`, vyřazený z finálního textu. Zahrnuje i detekci legend barevných škál na mapách/grafech (`"pod -150 -100 až -50..."`).
-- **Chytání popisků sazených v běžném písmu textu:** delší popisky obrázků v Živě nemají vždy malý bezpatkový font — poznají se podle vzorce "číslo obrázku + velké písmeno" na začátku bloku (`"1 a 2 Nejnápadnějším příznakem..."`).
-- **Rozšíření detekce `heading`:** menší podnadpisy v zadní části čísla používají velikost 13 (bold i non-bold), mimo původní rozsah 14–18.
-- **Skutečný bug — sléváno stylisticky nesourodého textu:** PyMuPDF sám dokáže spojit vizuálně blízký, ale obsahově nesouvisející text do jednoho syrového bloku (typicky konec jedné recenze + nadpis "Kontaktní adresy autorů" hned pod ním). Důsledek: dominantní styl "vyhrál" delší/nedůležitý fragment a nadpis zmizel pod klasifikací `body`. **Oprava:** `split_lines_by_style()` — rozdělení syrového bloku podle řádků, když se velikost písma mezi nimi výrazně změní (>3pt). Vyžadovalo dvě iterace (první verze srovnávala i tučnost, což zbytečně roztrhalo popisky obrázků s tučným číslem uvnitř — opraveno na porovnání jen podle velikosti).
-
-**Rozhodnutí:** obálkové stránky (první/poslední 2) se **neignorují** už při extrakci (viz Fáze 3) — extrakce zůstává kompletní, nezávislá na tom, co s ní pozdější fáze udělají.
+Scope: 75 issues, 2,941 articles, ~60,500 block chunks, ~35,000
+embedding chunks.
 
 ---
 
-## Fáze 2 — Obsah čísla a mapování stránek (`create_toc.py`, `build_page_map.py`)
+## Phase 1 — Extracting blocks from the PDF (`extract_blocks.py`)
 
-- Rekonstrukce/zobecnění parseru obsahu (tučné MeliorCE číslo = tištěná stránka, barva prvního spanu odlišuje titulek od autora).
-- **Zkrácené rozsahy stránek:** `"XXXI–II"` (= XXXI až XXXII) není čistá římská číslice → přidán `RANGE_RE`, extrahuje se jen počáteční hodnota.
-- **Sloučené položky obsahu:** když je pod jedním číslem stránky víc položek oddělených středníkem, `create_toc.py` je rozdělí na samostatné záznamy se stejnou stránkou (řešení viz Fáze 4).
-- **Mapování tištěná stránka → PDF stránka:** číslování není jedna souvislá řada — v jednom čísle se běžně střídá arabské (hlavní články) → římské (příloha) → arabské znovu, s jiným offsetem pokaždé. `build_page_map.py` detekuje tyhle souvislé úseky ("runs") samo a dopočítává mezery (chybějící patička na okrajové stránce) v rámci jednoho úseku — s bezpečným stropem (max. 5 stránek), aby to zůstalo opravdová korekce, ne hádání do velké mezery.
-- **Case-insensitivita římských číslic:** sazečský šotek (`"CXLVIiI"` s malým `i`) — regex byl case-sensitive, opraveno na obou nezávislých místech (`build_page_map.py`, `create_toc.py`), s normalizací na velká písmena.
+**Goal:** get structured text blocks out of the PDF (fitz/PyMuPDF), each
+with its page, type, font and position.
 
-**Přijaté known limitations (chyby zdroje, ne pipeline):** pár tištěných čísel stránek je ve zdrojovém PDF prokazatelně špatně (editorský copy-paste z minulého čísla, nebo špatné zarovnání) — tyhle záznamy se bezpečně přeskočí s varováním, místo aby se hádalo, co editor "měl na mysli".
+- Reconstructed the missing extraction script from the surviving outputs
+  (`blocks.json`, `toc.json`) and a sample PDF.
+- Heuristic classification of block type
+  (`title`/`heading`/`other`/`body`/`caption`/`annotation`) by font and
+  size, tuned specifically to Živa's typesetting (MeliorCE = the serif
+  body text and titles, HelveticaCE/Arial = the sans captions and
+  footers).
+- **Fix — words broken across a hyphen:** justified InDesign text breaks
+  words at the end of a line with a hyphen ("dlouhodo- bé"). Added
+  `smart_join()` with detection (a letter, then a trailing hyphen, then
+  a continuation in lowercase), applied both when assembling lines *and*
+  when merging adjacent blocks on the same page.
+- **Telling `annotation` from `caption`:** panel labels and scale bars
+  stuck onto a figure (`a`, `b`, `1 cm`, a run of numbers along a chart
+  axis) carry no content — a new `annotation` type, excluded from the
+  final text. It also detects the legends of colour scales on maps and
+  charts.
+- **Catching captions set in the body typeface:** Živa's longer figure
+  captions do not always use the small sans font; they are recognised by
+  the pattern "figure number followed by a capital" at the start of the
+  block.
+- **Widened `heading` detection:** the smaller subheadings in the back
+  matter use size 13, bold and non-bold alike, outside the original
+  range of 14 to 18.
+- **A real bug — stylistically unrelated text merged:** PyMuPDF itself
+  can join visually close but unrelated text into one raw block,
+  typically the end of one review plus the heading "Kontaktní adresy
+  autorů" right below it. The consequence: the longer, unimportant
+  fragment "won" the dominant style and the heading vanished under a
+  `body` classification. **Fix:** `split_lines_by_style()`, splitting a
+  raw block by line wherever the font size changes markedly (>3pt). It
+  took two iterations: the first version also compared weight, which
+  needlessly tore apart figure captions with a bold number inside;
+  corrected to compare size only.
 
----
-
-## Fáze 3 — Přiřazení bloků článkům (`assign_articles.py`)
-
-Nejsložitější a nejvíc iterovaná část pipeline.
-
-- Základní model: článek vlastní stránky od svého začátku po (nezahrnutě) začátek dalšího článku.
-- **Skutečný bug — sdílená hraniční stránka:** stránka může fyzicky obsahovat konec jednoho článku *a* začátek druhého (nalezeno při zkoumání mismatche: obsah o mykorhize omylem skončil u úplně jiného článku o epigenetice, protože sdíleli stránku). Poslední (3.) sloupec často běží nezávisle na zbytku stránky, takže "vše před titulkem v pořadí čtení" nestačí — **oprava:** `find_split_y()`, řez podle **Y-souřadnice** napříč všemi sloupci (ne podle pořadí v seznamu), použije pozici bloku s autorem/titulkem nového článku.
-- **Skupiny záznamů se stejnou stránkou** (výsledek sloučených TOC záznamů z Fáze 2): zobecnění na "N položek sdílí jednu stránku", ne jen 2. Rozdělení uvnitř skupiny primárně **počítáním nadpisů** (robustnější než text — recenze mívají v obsahu zkrácený titulek, ale v textu úplně jiný nadpis s celým jménem autora knihy), záložně **fuzzy textovou shodou** (přesná shoda → podřetězec po odstranění běžných prefixů → nejdelší společný podřetězec ≥15 znaků — řeší i případ, kdy jeden záznam v obsahu legitimně pokrývá dva nadpisy v textu, např. "Fenomén Velká kotlina" se dvěma pohledy dvou autorů).
-- **Bezpečnostní síť proti tiché ztrátě dat:** když se nenajde ani jedna shoda v celé skupině, nerozděluje se vůbec — sloučí se zpátky do jednoho záznamu se spojeným titulkem, místo aby obsah beze stopy zmizel (reálně nalezená chyba, opravena po auditu čísla 2023/1).
-- **Skutečný bug — `find_split_y` nikdy neuspěl u většiny zadních článků:** hledal jen `type=="title"` (vyhrazeno pro hlavní články), ne `"heading"` (běžné pro recenze/nekrology/kratší útvary), a používal přesnou textovou shodu místo fuzzy. Po opravě kleslo množství "neověřených" hraničních stránek na testovacím vzorku z 18 na 3 článků (z 37) — reálné zlepšení přesnosti napříč celým archivem, ne jen kosmetika.
-- **`quality_flags`** — nové pole u každého článku, explicitně přiznávající, kde se pipeline musela spolehnout na fallback/hádání: `boundary_page_unverified`, `heading_not_found_empty`, `absorbed_unmatched_siblings` (+ `absorbed_titles`), `merged_fallback` (+ `original_titles`).
-
-**Výsledek auditu quality_flags přes celý archiv** (2 941 článků): 8,8 % článků má aspoň jednu vlajku, ale 70 % z nich patří do jediné dobře známé kategorie (administrativní zadní strana čísla — Aktuality, Kontaktní adresy, Kalendář biologa, Editorial...). Z **jedinečných** případů se ověřilo, že jde skoro vždy o stejnou kategorii jen s konkrétním jménem; jediný skutečně odlišný nález (dvě sloučené recenze) se ukázal jako reálná editorská chyba ve zdroji (prohozené pořadí položek), ne chyba pipeline — a obsah zůstal bezpečně zachovaný, jen pod jiným titulkem.
-
----
-
-## Fáze 4 — Chunking pro RAG (`build_chunks.py`)
-
-- **Rozhodnutí:** chunkovat z `full_text` (plynulý text článku), ne z jednotlivých bloků — bloky mají příliš nesourodou délku (od jednoho znaku po stovky) pro embedding.
-- `full_text` cíleně **neobsahuje** popisky/anotace — obrázek uprostřed sloupce jinak trhá věty napůl (viz sdílené sloupce v Fázi 3). Popisky mají vlastní pole `captions_text`.
-- Cílová velikost chunku ~1200 znaků, s překryvem (posléze zmenšeno na `window=1` chunk okolo zásahu při retrievalu, viz Fáze 6 — spíš než zvětšovat překryv chunků samotných).
-- **Rozhodnutí (promyšlené, ne implicitní):** obálkové stránky (přední/zadní 2) se vyřazují **až tady**, na úrovni „co jde do RAG“ — ne dřív v extrakci ani v přiřazení článků. Vyžadovalo protáhnout čísla stránek z `assign_articles.py` až sem (`full_text_paragraphs` s polem `page` u každého odstavce místo jednoho stringu) — nic se tím neztrácí, jen přibylo dat.
-- **Skutečný bug:** `split_oversized_paragraph()` neuměl rozdělit odstavec bez jediné interpunkce (tabulka/výčet dat) — vracel ho vcelku, i 4× delší než limit. Fallback na sekání po slovech.
-- **Bezpečnostní limit tokenů:** místo preventivního zmenšení všech chunků kvůli vzácným výjimkám (limit 512 tokenů u standardních embedding modelů) se ořezává jen konkrétní text, co limit skutečně přesáhne (`enforce_max_length()` v `embed.py`) — zjištěno explicitním rozhodnutím, ne náhodou.
-- Metadata hlavička (`"Časopis: Živa\nRočník:...\nČlánek:...\nAutoři:...\nText:..."`) — tzv. contextual chunking, ověřeno experimentem, že "Časopis: Živa" (konstantní přes celý korpus) zbytečně ředí embedding, ale ponecháno beze změny na žádost (jednoduchost > mikrooptimalizace).
-
----
-
-## Fáze 5 — Embedding
-
-**Rozhodnutí (s odůvodněním, ne default):**
-- Lokální model přes `sentence-transformers` (ne API) — jazykově čistě český obsah, jednorázový/opakovatelný běh, edukační zájem vidět mechaniku pod pokličkou. API jako budoucí rozšíření (architektura embeddingu jako vyměnitelná funkce).
-- `normalize_embeddings=True`, float32 (float16 na CPU bez výhody), batch size neřešeno jako riziko (embedding modely jsou o řád menší než LLM).
-- Dimenze vektoru záměrně neřešena jako kritérium výběru u malého datasetu — model si nese dimenzi, není to nezávislý knoflík.
-- Porovnání kandidátů (`compare_models.py`) na vlastních testovacích dotazech se známou odpovědí, ne obecný benchmark.
-- `embed.py`: `_load_model()` zkouší nejdřív `local_files_only=True` (žádná síť), spadá na online stažení jen když model ještě není v cache — řeší zbytečné síťové zpomalení při opakovaném spouštění.
-- **Checkpointing** (`build_embeddings.py`): průběžné ukládání přes `np.memmap` po dávkách, ať jde velký běh (hodiny na CPU) bezpečně přerušit/navázat. Ověřeno reálným přerušením uprostřed běhu.
-- **Statistický sanity check** (`check_embeddings.py`): místo jednoho anekdotického páru — stovky náhodně losovaných párů (stejný/různý článek), měří se **relativní** oddělení (% párů ze stejného článku nad mediánem různých), ne absolutní čísla podobnosti (embedding prostory bývají anizotropní, absolutní čísla zavádí). Výsledek na plném archivu: 98,8 % separace.
+**Decision:** cover pages (the first and last two) are **not** ignored
+during extraction (see Phase 3). Extraction stays complete and
+independent of what the later phases do with it.
 
 ---
 
-## Fáze 6 — Vektorové úložiště a retrieval (Chroma)
+## Phase 2 — The contents page and page mapping (`create_toc.py`, `build_page_map.py`)
 
-- **Rozhodnutí:** Chroma místo FAISS — jednodušší kód (vestavěná metadata a filtrování) za cenu aproximativního (ne exaktního) vyhledávání — na velikosti tohoto datasetu prakticky nerozlišitelné.
-- Vektory se do Chromy dodávají **hotové** (ne přes její vlastní `embedding_function`) — udržuje embedding jako nezávisle vyměnitelnou komponentu.
-- **Skutečný bug:** `collection.add()` na existující ID mlčky nic nepřepíše (žádná chyba, žádný efekt) — po přegenerování korpusu se tak vracely staré výsledky. Oprava: `upsert()` + `--overwrite` flag pro kompletní přestavbu při změně struktury dat.
-- **Retrieval strategie** (`assemble_context.py`): top_N=10 kandidátů, seskupení podle článku; článek s ≥3 zásahy v top_10 se povýší na **celý článek** z korpusu (silný signál, že dotaz cílí na něj celý); ostatní dostanou window expansion (±1 chunk okolo zásahu, sloučení překrývajících se oken) — vědomě zvolený kompromis mezi "jen krátký chunk" a "celý článek pro všechno".
-- Citace u každého bloku kontextu (časopis/ročník/číslo/článek/autoři/strany) — rozhodnuto jako "must" hned na začátku diskuze o retrievalu.
+- Reconstructed and generalised the contents parser (a bold MeliorCE
+  number = the printed page; the colour of the first span separates the
+  title from the author).
+- **Abbreviated page ranges:** `"XXXI–II"` (= XXXI to XXXII) is not a
+  clean Roman numeral, so `RANGE_RE` was added and only the starting
+  value is extracted.
+- **Combined contents entries:** where several items share one page
+  number, separated by a semicolon, `create_toc.py` splits them into
+  separate records with the same page (resolution in Phase 4).
+- **Mapping printed page to PDF page:** the numbering is not one
+  continuous sequence — within an issue it routinely alternates Arabic
+  (main articles) → Roman (supplement) → Arabic again, with a different
+  offset each time. `build_page_map.py` detects these contiguous runs
+  itself and fills the gaps (a missing footer on an edge page) within a
+  run, with a safe cap of five pages so that it stays a genuine
+  correction rather than guessing into a large gap.
+- **Case-insensitive Roman numerals:** a typesetting slip (`"CXLVIiI"`
+  with a lowercase `i`) — the regex was case-sensitive, fixed in both
+  independent places (`build_page_map.py`, `create_toc.py`), with
+  normalisation to upper case.
+
+**Accepted known limitations (errors in the source, not the pipeline):**
+a few printed page numbers are demonstrably wrong in the source PDF (an
+editorial copy-paste from the previous issue, or bad alignment). Such
+records are skipped safely with a warning, rather than guessing what the
+editor "meant".
 
 ---
 
-## Diagnostické nástroje (vytvořené průběžně, ne až na konci)
+## Phase 3 — Assigning blocks to articles (`assign_articles.py`)
 
-- `diag_groups.py` — vypíše seřazený obsah vícepoložkové skupiny s vyznačenými nadpisy a skutečným výsledkem přiřazení.
-- `diag_kontaktni_adresy.py`, `diag_page_resolve.py`, `diag_page_spans.py` — cílené diagnostiky pro konkrétní opakující se selhání.
-- `summarize_quality_flags.py` — souhrn `quality_flags` napříč celým korpusem, rozpad podle typu i čísla, filtr na jedinečné (neopakující se) tituly pro odlišení známého šumu od nového problému.
+The most complex and most iterated part of the pipeline.
+
+- The basic model: an article owns the pages from its own start up to,
+  but not including, the start of the next article.
+- **A real bug — a shared boundary page:** a page can physically contain
+  the end of one article *and* the start of another. Found while
+  investigating a mismatch: content about mycorrhiza ended up in a
+  completely different article about epigenetics because they shared a
+  page. The last of three columns often runs independently of the rest
+  of the page, so "everything before the title in reading order" is not
+  enough. **Fix:** `find_split_y()`, a cut by **Y coordinate** across
+  all columns rather than by position in the list, using the position of
+  the block holding the new article's author or title.
+- **Groups of records sharing a page** (the result of the combined TOC
+  records from Phase 2): generalised to "N items share one page", not
+  just two. Splitting within a group is primarily done by **counting
+  headings** (more robust than text: reviews tend to have a shortened
+  title in the contents but a completely different heading in the body,
+  with the book author's full name), falling back to a **fuzzy text
+  match** (exact match → substring after stripping common prefixes →
+  longest common substring of at least 15 characters, which also handles
+  a contents entry legitimately covering two headings in the text, e.g.
+  one feature presented from two authors' viewpoints).
+- **A safety net against silent data loss:** when not one match is found
+  in a whole group, no split happens at all — the group merges back into
+  one record with a joined title, rather than the content disappearing
+  without a trace. A real bug, fixed after an audit of issue 2023/1.
+- **A real bug — `find_split_y` never succeeded on most back-matter
+  articles:** it looked only for `type=="title"`, which is reserved for
+  main articles, not for `"heading"`, which is what reviews, obituaries
+  and shorter formats use, and it used an exact text match rather than a
+  fuzzy one. After the fix, the number of "unverified" boundary pages in
+  the test sample fell from 18 to 3 articles out of 37 — a real
+  improvement in accuracy across the archive, not cosmetics.
+- **`quality_flags`** — a new field on every article, admitting
+  explicitly where the pipeline had to fall back on a guess:
+  `boundary_page_unverified`, `heading_not_found_empty`,
+  `absorbed_unmatched_siblings` (plus `absorbed_titles`),
+  `merged_fallback` (plus `original_titles`).
+
+**Result of the quality_flags audit across the archive** (2,941
+articles): 8.8% of articles carry at least one flag, but 70% of those
+belong to a single well-understood category, the administrative back
+matter of an issue (news, contact addresses, the biologist's calendar,
+the editorial). Of the **unique** cases, almost all turned out to be the
+same category with a specific name; the one genuinely different finding,
+two merged reviews, turned out to be a real editorial error in the
+source (two items printed in swapped order), not a pipeline error — and
+the content stayed safely preserved, merely under a different title.
 
 ---
 
-## Přehled klíčových rozhodnutí (proč, ne jen co)
+## Phase 4 — Chunking for RAG (`build_chunks.py`)
 
-| Rozhodnutí | Alternativa zvážená | Proč tahle volba |
+- **Decision:** chunk from `full_text`, the continuous article text,
+  rather than from individual blocks. Blocks are far too uneven in
+  length, from one character to hundreds, for embedding.
+- `full_text` deliberately **excludes** captions and annotations: a
+  figure mid-column otherwise cuts sentences in half (see the shared
+  columns in Phase 3). Captions have their own `captions_text` field.
+- A target chunk size of ~1200 characters with an overlap (later
+  narrowed to a `window=1` chunk around a hit at retrieval time, see
+  Phase 6, rather than enlarging the chunk overlap itself).
+- **A deliberate decision, not an implicit one:** cover pages (the front
+  and back two) are excluded **here**, at the level of "what goes into
+  RAG", and not earlier in extraction or article assignment. It required
+  carrying page numbers from `assign_articles.py` all the way here
+  (`full_text_paragraphs`, with a `page` on each paragraph instead of
+  one string) — nothing is lost, only data added.
+- **A real bug:** `split_oversized_paragraph()` could not split a
+  paragraph with not one piece of punctuation (a table or a data
+  listing) — it returned it whole, up to four times the limit. Fixed
+  with a fallback to splitting on word boundaries.
+- **A safety limit on tokens:** rather than shrinking all chunks
+  pre-emptively because of a rare exception (the 512-token limit of
+  standard embedding models), only the specific text that really
+  overflows is truncated (`enforce_max_length()` in `embed.py`) - an
+  explicit decision, not an accident.
+- The metadata header (`"Časopis: Živa\nRočník:...\nČlánek:...\nAutoři:...\nText:..."`)
+  — contextual chunking. An experiment confirmed that "Časopis: Živa",
+  constant across the whole corpus, dilutes the embedding needlessly,
+  but it was left as it is on request (simplicity over
+  micro-optimisation).
+
+---
+
+## Phase 5 — Embedding
+
+**Decisions, with reasons rather than defaults:**
+
+- A local model via `sentence-transformers` rather than an API: the
+  content is purely Czech, the run is one-off and repeatable, and there
+  was an educational interest in seeing the mechanism underneath. An API
+  is a future extension (the embedding architecture is an
+  interchangeable function).
+- `normalize_embeddings=True`, float32 (float16 brings no benefit on a
+  CPU), batch size not treated as a risk (embedding models are an order
+  of magnitude smaller than an LLM).
+- Vector dimension deliberately not treated as a selection criterion on
+  a small dataset: the model carries its dimension, it is not an
+  independent knob.
+- Candidates were compared (`compare_models.py`) on our own test queries
+  with known answers, not on a general benchmark.
+- `embed.py`: `_load_model()` tries `local_files_only=True` first (no
+  network) and falls back to an online download only when the model is
+  not cached yet — this removes a pointless network delay on every
+  repeated run.
+- **Checkpointing** (`build_embeddings.py`): progressive saving via
+  `np.memmap` in batches, so that a long run (hours on a CPU) can be
+  interrupted and resumed safely. Verified by a real interruption
+  mid-run.
+- **A statistical sanity check** (`check_embeddings.py`): instead of one
+  anecdotal pair, hundreds of randomly drawn pairs (same article vs.
+  different article), measuring the **relative** separation (the share
+  of same-article pairs above the median of different-article pairs)
+  rather than absolute similarity numbers, which mislead because
+  embedding spaces are anisotropic. Result over the full archive: 98.8%
+  separation.
+
+---
+
+## Phase 6 — Vector store and retrieval (Chroma)
+
+- **Decision:** Chroma rather than FAISS — simpler code (metadata and
+  filtering built in) at the price of approximate rather than exact
+  search, which at this dataset's size is practically indistinguishable.
+- Vectors are handed to Chroma **already computed**, not through its own
+  `embedding_function`, which keeps embedding an independently
+  replaceable component.
+- **A real bug:** `collection.add()` on an existing ID silently
+  overwrites nothing — no error, no effect — so after regenerating the
+  corpus the old results kept coming back. Fixed with `upsert()` plus an
+  `--overwrite` flag for a complete rebuild when the data structure
+  changes.
+- **Retrieval strategy** (`assemble_context.py`): top_N=10 candidates,
+  grouped by article; an article with three or more hits in the top 10
+  is promoted to **the whole article** from the corpus (a strong signal
+  that the query is aimed at it in full); the others get window
+  expansion (one chunk either side of a hit, overlapping windows
+  merged) — a consciously chosen compromise between "a short chunk only"
+  and "the whole article for everything".
+- A citation on every block of context (magazine, year, issue, article,
+  authors, pages) — settled as a must at the very start of the retrieval
+  discussion.
+
+---
+
+## Diagnostic tools (built along the way, not at the end)
+
+- `diag_groups.py` — prints the sorted content of a multi-entry group
+  with the headings marked and the actual assignment result.
+- `diag_contact_addresses.py`, `diag_page_resolve.py`,
+  `diag_page_spans.py` — targeted diagnostics for specific recurring
+  failures.
+- `summarize_quality_flags.py` — a summary of `quality_flags` across the
+  corpus, broken down by type and by issue, with a filter for unique
+  (non-recurring) titles to separate familiar noise from a new problem.
+
+---
+
+## Key decisions at a glance (why, not just what)
+
+| Decision | Alternative considered | Why this way |
 |---|---|---|
-| Obálka se ořezává až při chunkování | Ořezat hned při extrakci | Zachovat syrovou digitalizaci kompletní a znovupoužitelnou |
-| Chunking z `full_text`, ne z bloků | Chunkovat přímo bloky | Konzistentní velikost pro embedding |
-| Lokální embedding model | Rovnou API | Čistě český text, edukační zájem, nulové náklady na experimenty |
-| Chroma | FAISS + vlastní metadata store | Jednoduchost kódu > plná kontrola |
-| `window=1`, `promote_threshold=3` | Vždy jen chunk / vždy celý článek | Kompromis: krátké chunky nestačí, celé články jsou plýtvání, když dotaz necílí na 1 zdroj |
-| `quality_flags` jako metadata, ne tichá oprava | Slepě hádat/spojovat | Transparentnost nad falešnou jistotou |
+| Covers trimmed at chunking time | Trim during extraction | Keep the raw digitisation complete and reusable |
+| Chunk from `full_text`, not from blocks | Chunk the blocks directly | Consistent size for embedding |
+| A local embedding model | An API straight away | Purely Czech text, educational interest, zero cost per experiment |
+| Chroma | FAISS plus our own metadata store | Simplicity of code over full control |
+| `window=1`, `promote_threshold=3` | Always a chunk / always a whole article | A compromise: short chunks are not enough, whole articles are waste when the query is not aimed at one source |
+| `quality_flags` as metadata, not a silent fix | Guess and merge blindly | Transparency over false certainty |
 
 ---
 
-## Otevřené konce / co zbývá
+## Loose ends at the time (all since closed)
 
-- Sestavení promptu pro LLM z `assemble_context.py` výstupu (systémová instrukce + kontext + otázka).
-- Případný reranking (cross-encoder) jako druhá fáze, pokud window/promote heuristika v praxi nestačí.
-- Případ ojedinělé chyby "prohozené pořadí recenzí" (2019/6) zůstává vědomě neopravený (viz known limitations).
-
----
-
-## Fáze 7 — Generování odpovědi (`answer.py`)
-
-Poslední otevřený konec z předchozí verze. Systémová instrukce ležela
-v souboru, který nikdo nečetl, a pipeline končila u vypsaného kontextu.
-
-- Prompt má tři části a každá je jinde schválně: **systémová instrukce**
-  v profilu zdroje (pravidla citování i jazyk odpovědi patří ke korpusu,
-  ne k pipeline), **kontext** jako očíslované Zdroje s plnou citací
-  a značkou CELÝ ČLÁNEK / výřez, a **dotaz** až úplně na konci, aby
-  stabilní část promptu šla cachovat.
-- Značka CELÝ ČLÁNEK / výřez není kosmetika — systémová instrukce se na ni
-  odvolává. U výřezu smí model přiznat, že úryvek začíná uprostřed
-  myšlenky; u celého článku by taková výhrada byla falešná opatrnost.
-- `--dry-run` vypíše hotový prompt a nic neposílá do API. Ladit retrieval
-  se dá zadarmo a bez klíče.
+- Assembling the LLM prompt from `assemble_context.py` output (system
+  instruction plus context plus question).
+- Possible reranking (a cross-encoder) as a second pass if the
+  window/promote heuristic proved insufficient in practice.
+- The isolated "swapped review order" error (2019/6) remains knowingly
+  unfixed (see known limitations).
 
 ---
 
-## Fáze 8 — Refaktor na profily zdroje
+## Phase 7 — Answer generation (`answer.py`)
 
-**Problém:** pipeline byla použitelná na jeden konkrétní časopis. Jména
-fontů, velikosti písma, tvar patičky, stránka s obsahem a název časopisu
-byly zadrátované na šesti různých místech napříč pěti skripty.
+The last loose end from the previous version. The system instruction sat
+in a file nobody read, and the pipeline stopped at printed context.
 
-**Řešení:** všechno tohle je teď **data** v jednom `SourceProfile`, ne `if`
-uprostřed parseru. Přidat časopis znamená napsat jeden profil.
-
-- **Adaptivní klasifikace** (`profiles/adaptive.py`) — odpověď na to, že
-  u nového časopisu nikdo nezná jména fontů. Referenční velikost písma se
-  odvodí z dokumentu (nejobjemnější kombinace rodina+velikost podle počtu
-  ZNAKŮ, ne podle počtu bloků — titulků je na stránce hodně kusů, ale málo
-  textu) a všechna pravidla jsou relativní k ní. Přenositelné bez kalibrace,
-  za cenu toho, že nepozná rozdíly, které nejsou typografické (řádek
-  s autorem má skoro stejnou velikost jako text).
-- **Dvě strategie detekce patičky**, protože jedna nestačí: `keyword`
-  podle obsahu (Živa má v patičce vlastní název a doménu) a `position`
-  podle polohy na stránce (MagPi má v patičce jen číslo).
-- **`tools/inspect_fonts.py`** — kalibrace nového profilu. Vypíše histogram
-  sazby s ukázkami, návrh pravidel a kandidáty na patičku. Kontrola: na
-  vzorovém čísle Živy z něj vypadne přesně to, co bylo původně odvozené
-  ručně.
-
-**Skutečný bug nalezený při psaní testů:** `label_to_int()` porovnávala
-římské číslice case-insensitive, ale `roman_to_int()` uměla jen velká
-písmena — `"CXLVIiI"` (sazečský šotek) tedy tiše vracelo 146 místo 148.
-V pipeline se to neprojevilo, protože `extract_label()` token normalizuje
-dřív, ale diagnostické nástroje volají `label_to_int()` napřímo. Normalizace
-patří dovnitř. Druhý nález: `ROMAN_RE` bez horní meze délky prohlásí za
-římskou číslici jakýkoli dost dlouhý shluk písmen I/V/X/L/C/D/M — u detekce
-patičky podle polohy se to reálně stane.
-
-**Reprodukovatelnost:**
-
-- Zamčené verze v `requirements.txt`. PyMuPDF mezi verzemi mění, jak dělí
-  stránku na bloky, a to je vstup úplně všeho ostatního.
-- **Zlatý test** porovnává SHA-256 otisk výstupu každé fáze. Fixture
-  neobsahuje obsah časopisu, jen otisky a počty — reaguje stejně citlivě
-  jako porovnání textu, ale nezveřejňuje ani písmeno. Bez PDF se přeskočí.
-- Celý refaktor je ověřený regresí: `run_all` nad vzorovým číslem dává
-  `blocks`, `toc`, `page_map`, `articles`, `corpus` i `chunks` **bajtově
-  shodné** s výstupem před refaktorem.
-
-**Oprava, která byla nejvíc vidět:** pipeline padala na `UnicodeEncodeError`
-na prvním printu na každé konzoli s kódováním cp1252 (výchozí stav na
-Windows). Fungovala jen ve Spyderu, který má stdout v UTF-8 — tedy přesně
-ten druh chyby, kterou autor nikdy nevidí a každý, kdo si projekt naklonuje,
-do ní narazí do dvou sekund.
-
-**Kolik adaptivní profil stojí přesnosti** (měřeno na vzorovém čísle Živy,
-kde adaptivní profil neví o Živě vůbec nic — ani jméno fontu, ani kde je
-obsah čísla, ani co stojí v patičce): 36 článků proti 37, všech 36 titulků
-shodných s ručním profilem, 19 z nich má bajtově shodný i celý text.
-Chybějící článek se ztratil na nenamapovaném tištěném čísle stránky, zbylé
-rozdíly jsou hranice odstavců, ne ztracený obsah. Počet článků označených
-`quality_flags` je u obou profilů stejný (3).
-
-**Bug nalezený tímhle měřením:** první verze adaptivního profilu dědila
-výchozí `footer_detection="keyword"` s prázdným seznamem klíčových slov.
-Detekce patičky pak nenašla jediné tištěné číslo stránky, obsah čísla se
-neměl na co namapovat a pipeline **tiše vyrobila nula článků** — přesně ten
-typ selhání, který se bez porovnání se známým výsledkem nepozná, protože
-nic nespadne. Ošetřeno dvakrát: adaptivní profil používá `"position"`,
-a `is_footer_block()` u strategie `"keyword"` bez klíčových slov vrací
-`False` místo toho, aby za patičku prohlásila každý malý text na stránce.
+- The prompt has three parts and each lives somewhere different on
+  purpose: the **system instruction** in the source profile (the
+  citation rules and the language of the answer belong to the corpus,
+  not the pipeline), the **context** as numbered sources with a full
+  citation and a FULL ARTICLE / excerpt marker, and the **question** at
+  the very end, so that the stable part of the prompt can be cached.
+- The FULL ARTICLE / excerpt marker is not decoration: the system
+  instruction refers to it. On an excerpt the model may admit that the
+  fragment starts mid-thought; on a whole article such a caveat would be
+  false caution.
+- `--dry-run` prints the finished prompt and sends nothing to the API.
+  Retrieval can be tuned for free and without a key.
 
 ---
 
-## Fáze 9 — Ověření na druhém časopise (The MagPi)
+## Phase 8 — Refactoring onto source profiles
 
-Test toho, jestli profily zdroje opravdu fungují, nebo jen vypadají hezky.
-Tři reálná čísla MagPi (150, 152, 155), born-digital PDF, 132 stran, žádná
-ručně zadaná hodnota o sazbě.
+**The problem:** the pipeline was usable on one specific magazine. Font
+names, point sizes, the shape of the footer, the contents page and the
+magazine's name were hard-wired in six different places across five
+scripts.
 
-**Postup byl 10 → 39 → 92 článků**, přičemž každý skok odhalil chybu, kterou
-Živa nemohla ukázat, a — to je na tom podstatné — **žádná z nich nespadla**.
-Pipeline pokaždé doběhla, vypsala souhrn a tvářila se spokojeně.
+**The solution:** all of that is now **data** in a single
+`SourceProfile`, not an `if` in the middle of a parser. Adding a
+magazine means writing one profile.
 
-1. **Popisky stránek se nepotkaly.** Obsah MagPi uvádí `032`, patička na
-   stránce `32`. Mapování stránek přitom fungovalo dokonale (jeden souvislý
-   úsek, posun 0, 97 ze 132 stránek detekováno přímo) — jen se na sebe obě
-   strany nenapojily. Oprava: `normalize_label()` sjednotí zápis na
-   kanonický tvar na obou koncích. Živa nuly nedoplňuje, takže tam takový
-   nesoulad nikdy nevznikl.
+- **Adaptive classification** (`profiles/adaptive.py`) — the answer to
+  nobody knowing a new magazine's font names. The reference font size is
+  derived from the document (the most voluminous family-and-size
+  combination by CHARACTER count, not by block count: a page carries
+  many titles but little of their text) and every rule is relative to
+  it. Portable without calibration, at the cost of not seeing
+  distinctions that are not typographic — the author line is nearly the
+  same size as the text.
+- **Two footer-detection strategies**, because one is not enough:
+  `keyword` by content (Živa's footer carries its own name and domain)
+  and `position` by place on the page (The MagPi's footer carries only a
+  number).
+- **`tools/inspect_fonts.py`** — calibration for a new profile. It
+  prints a typography histogram with samples, a suggested set of rules
+  and the footer candidates. As a check: on the sample issue of Živa it
+  produces exactly what had originally been derived by hand.
 
-2. **Řídicí znaky v titulcích.** Ozdobná odrážka před položkou obsahu vyjde
-   z PDF jako `U+0007` a zůstala v titulku. Rozbíjelo to textové porovnání
-   titulku z obsahu s nadpisem nalezeným v těle čísla (`texts_match`).
-   Oprava v `clean()`; řeší se porovnáním znaků, ne regulárním výrazem
-   s rozsahem — ten se špatně čte a snadno se v něm udělá chyba.
+**A real bug found while writing the tests:** `label_to_int()` compared
+Roman numerals case-insensitively, but `roman_to_int()` understood upper
+case only — so `"CXLVIiI"` (a typesetting slip) quietly returned 146
+instead of 148. It never showed in the pipeline, because
+`extract_label()` normalises the token first, but the diagnostic tools
+call `label_to_int()` directly. Normalisation belongs inside. A second
+finding: `ROMAN_RE` without an upper length bound declares any long
+enough run of the letters I/V/X/L/C/D/M a Roman numeral — and under
+position-based footer detection that really happens.
 
-3. **Obsah čísla je rozložený přes tři stránky.** `find_toc_pages()` brala
-   jen tu nejlepší, takže se dvě třetiny čísla nikdy nezpracovaly. Oprava:
-   dvojí práh, absolutní (odliší obsah od stránky s pár zatoulanými čísly)
-   a relativní k nejlepší stránce (přibere její protějšky). U čísla 150 to
-   navíc opravilo případ, kdy „nejlepší" stránka byla ta horší z dvoustrany.
+**Reproducibility:**
 
-**Chyba v samotném kalibračním nástroji.** `inspect_fonts` doporučoval pro
-MagPi strategii `"keyword"`, i když správná je `"position"`. Filtr „vypiš,
-co se u okraje opakuje" totiž čísla stránek spolehlivě schová: název
-časopisu je na každé stránce **týž řetězec**, kdežto číslo stránky je na
-každé stránce **jiné**. Musí se počítat každé jinak. K tomu dvě chyby
-v jmenovateli: podíly se počítaly proti celému číslu, i když se prohlédlo
-jen prvních N stránek, a čísla se sčítala po výskytech místo po stránkách
-(číslo bývá vysázené nahoře i dole, takže součet přesáhl počet stránek —
-u Živy vyšlo „140 z 84"). Po opravě doporučí nástroj `"position"` pro oba
-časopisy, což je pro oba to, co skutečně funguje.
+- Pinned versions in `requirements.txt`. PyMuPDF changes how it splits a
+  page into blocks between versions, and that is the input to everything
+  else.
+- **A golden test** compares a SHA-256 fingerprint of each stage's
+  output. The fixture holds no magazine content, only fingerprints and
+  counts — as sensitive as comparing the text, while publishing not one
+  letter. It skips without the PDF.
+- The whole refactor is verified by regression: `run_all` over the
+  sample issue produces `blocks`, `toc`, `page_map`, `articles`,
+  `corpus` and `chunks` **byte-identical** to the output from before the
+  refactor.
 
-**Co zůstává nedořešené:** rozdělení titulku a autora podle barvy prvního
-spanu je ryze živovská heuristika. U MagPi místo autora vychází název
-rubriky („Tutorials") a na stránce s obsahem se pár čísel v jiném formátu
-mylně vezme za začátek nové položky, takže vzniknou duplicitní záznamy
-(reálně asi čtvrtina). Na použitelnost korpusu to nemá vliv — text článků
-i stránkové rozsahy sedí — ale metadata autorů by pro MagPi chtěla vlastní
-pravidlo.
+**The most visible fix:** the pipeline died with a `UnicodeEncodeError`
+on its first print on any console using cp1252, the Windows default. It
+worked only in Spyder, whose stdout is UTF-8 — exactly the kind of bug
+the author never sees and everyone who clones the project hits within
+two seconds.
 
-Regrese na Živě prošla po každé z těchhle změn: `blocks`, `toc`, `page_map`,
-`articles` i `chunks` zůstávají bajtově shodné.
+**What the adaptive profile costs in accuracy** (measured on the sample
+issue of Živa, where the adaptive profile knows nothing at all about
+Živa — not the font name, not where the contents are, not what stands in
+the footer): 36 articles against 37, all 36 titles identical to the hand
+profile's, 19 of them byte-identical in full text too. The missing
+article was lost on an unmapped printed page number; the remaining
+differences are paragraph boundaries, not lost content. The number of
+articles carrying `quality_flags` is the same for both profiles (3).
+
+**A bug found by that measurement:** the first version of the adaptive
+profile inherited the default `footer_detection="keyword"` with an empty
+list of keywords. Footer detection then found not one printed page
+number, the contents had nothing to map onto, and the pipeline
+**quietly produced zero articles** — exactly the kind of failure that
+goes unnoticed without a comparison against a known result, because
+nothing crashes. Guarded twice over: the adaptive profile uses
+`"position"`, and `is_footer_block()` under the `"keyword"` strategy
+with no keywords returns `False` instead of declaring every small piece
+of text on the page a footer.
 
 ---
 
-## Fáze 10 — Duplicitní záznamy a vymyšlení autoři u MagPi
+## Phase 9 — Verification on a second magazine (The MagPi)
 
-Dvě zbylé vady z předchozí fáze. Obě vedly na tutéž příčinu: obsah čísla
-se četl podle pravidel ušitých na Živu, i když u MagPi platí jiná.
+A test of whether source profiles really work or merely look tidy. Three
+real MagPi issues (150, 152, 155), born-digital PDF, 132 pages, not one
+hand-entered value about the typesetting.
 
-**Co na stránce s obsahem MagPi vlastně stojí.** Nejsou tam jeden, ale
-**tři různé druhy čísel**, a jen jeden z nich jsou položky obsahu:
+**The progression was 10 → 39 → 92 articles**, each jump exposing a bug
+Živa could not have shown and — this is the point — **not one of them
+crashed**. The pipeline finished every time, printed a summary and
+looked content.
 
-1. skutečná čísla stránek (u 155 `RobotoSerif` 8,5 b černě, u 150
-   `Rajdhani` 14 b),
-2. ozdobné upoutávky — velké bílé číslo s krátkým popiskem, vysázené do
-   barevné plochy,
-3. číslo samotné stránky s obsahem v běžící patičce.
+1. **The page labels did not meet.** The MagPi's contents give `032`,
+   the footer on the page `32`. The page mapping worked perfectly: one
+   contiguous run, offset 0, 97 of 132 pages detected directly. The two
+   sides simply did not connect. Fixed with `normalize_label()`, which
+   normalises the form at both ends. Živa does not zero-pad, so such a
+   mismatch never arose there.
 
-Druhy 2 a 3 zakládaly falešné položky, které pak v korpusu vypadaly jako
-duplicity („Contents", „Top Projects", tentýž článek dvakrát).
+2. **Control characters in titles.** The decorative bullet before a
+   contents entry comes out of the PDF as `U+0007` and stayed in the
+   title. It broke the text comparison between a contents title and the
+   heading found in the body (`texts_match`). Fixed in `clean()`, by
+   comparing characters rather than by a regex with a range: a range is
+   hard to read and easy to get wrong.
 
-**Proč to nešlo zapsat do profilu.** MagPi mezi čísly 150 a 152 předělal
-grafiku: změnily se fonty (`Rajdhani`/`RobotoSlab` → `Roboto*`), velikosti
-i formát čísel (`22` → `032`). Jedna sada napevno zadaných hodnot by
-platila jen na část archivu a na zbytku by tiše vyrobila nesmysly.
+3. **The contents are spread across three pages.** `find_toc_pages()`
+   took only the best one, so two thirds of the issue were never
+   processed. Fixed with two thresholds: absolute (to tell the contents
+   from a page with a few stray numbers) and relative to the best page
+   (to pick up its counterparts). On issue 150 that also fixed the case
+   where the "best" page was the weaker half of a spread.
 
-**Řešení: stejná úvaha jako u klasifikace bloků, jen o patro výš.** Obsah
-je seznam, takže se v něm **dvojice „styl čísla + styl titulku hned za
-ním"** opakuje u každé položky. Nejčastější taková dvojice je z definice
-ta pravá; ozdobná upoutávka vede na jiný druh textu a je jí řádově míň.
-Měřeno na reálných datech je rozestup pohodlný — u Živy má druhá pravá
-dvojice 79 % četnosti první, u MagPi má první ozdobná upoutávka 14 %.
+**A bug in the calibration tool itself.** `inspect_fonts` recommended
+`"keyword"` for The MagPi when the right answer is `"position"`. The
+"print what repeats near the edge" filter reliably hides page numbers:
+the magazine's name is the SAME string on every page, whereas the page
+number is DIFFERENT on every page. They have to be counted differently.
+Plus two errors in the denominator: the shares were computed against the
+whole issue even when only the first N pages had been examined, and
+numbers were summed by occurrence rather than by page (the number is
+often set at both top and bottom, so the sum exceeded the page count —
+on Živa it printed "140 of 84"). After the fix the tool recommends
+`"position"` for both magazines, which is what actually works for both.
 
-Dvě iterace, obě poučné:
+**What remained unresolved at this point:** splitting title from author
+by the colour of the first span is a purely Živa heuristic. On The MagPi
+the section name ("Tutorials") came out as the author, and on the
+contents page a few numbers in a different format were mistaken for the
+start of a new entry, producing duplicate records (about a quarter in
+practice). It did not affect the corpus's usability — the article text
+and page ranges were right — but the author metadata needed a rule of
+its own for The MagPi.
 
-- **První verze brala jen jeden nejčastější styl čísla.** Na MagPi to
-  fungovalo, na Živě spadl počet článků z 37 na 23 — Živa má v obsahu dvě
-  rovnocenné velikosti čísel (9 a 10 b) a polovina položek se ztratila.
-  Bez porovnání s druhým časopisem by se to nepoznalo.
-- **Druhá verze brala jen jeden nejčastější styl textu.** Táž chyba
-  o krok dál: Živa míchá i velikosti titulků. Až práh na četnost celé
-  dvojice, ne na jednotlivý styl, sedí na obojí.
+The Živa regression passed after each of these changes: `blocks`, `toc`,
+`page_map`, `articles` and `chunks` all stay byte-identical.
 
-**Autoři.** Rozdělení titulku a autora podle barvy prvního spanu je ryze
-živovská věc. Obsah MagPi autory neuvádí vůbec, takže se jako autor
-vyráběl název rubriky („Tutorials", „Project Showcase"). Nové pole
-`toc_has_authors` to vypíná. U adaptivního profilu je vypnuté taky, a to
-záměrně: chybějící autor je prázdné pole, kdežto špatně rozdělený titulek
-je poškozený titulek **a** vymyšlený autor zároveň.
+---
 
-**Vedlejší oprava:** `font_family()` neuměla optickou velikost ve jménu
-fontu, takže `RobotoSerif-20ptRegular` a `RobotoSerif-Italic` vycházely
-jako dvě různé rodiny. Kurzívou vysázená část titulku se pak zahazovala
-jako cizí styl.
+## Phase 10 — Duplicate records and invented authors on The MagPi
 
-**Výsledek.** MagPi: 85 článků ze tří čísel, žádná duplicitní stránka,
-žádný vymyšlený autor. Živa přes adaptivní profil: 37 článků, tedy přesně
-tolik co ruční profil (dřív 36), a 36 z 37 titulků ručního profilu je
-doslova obsaženo v adaptivních. Regrese ručního profilu zůstává bajtově
-shodná.
+The two remaining defects from the previous phase. Both traced to the
+same cause: the contents page was being read by rules cut for Živa, when
+The MagPi's are different.
+
+**What is actually on The MagPi's contents page.** Not one kind of
+number but **three**, and only one of them is a contents entry:
+
+1. the real page numbers (`RobotoSerif` at 8.5pt in black on issue 155,
+   `Rajdhani` at 14pt on issue 150),
+2. decorative callouts — a large white number with a short caption, set
+   into a coloured panel,
+3. the number of the contents page itself in the running footer.
+
+Kinds 2 and 3 created false entries, which then looked like duplicates
+in the corpus ("Contents", "Top Projects", the same article twice).
+
+**Why it could not be written into the profile.** The MagPi redesigned
+between issues 150 and 152: fonts changed (`Rajdhani`/`RobotoSlab` to
+`Roboto*`), as did sizes and the number format (`22` to `032`). One set
+of hard-coded values would hold for part of the archive only, and would
+quietly produce nonsense on the rest.
+
+**The solution: the same reasoning as block classification, one storey
+up.** The contents are a list, so the **"number style + style of the
+title right after it" pair** repeats for every entry. The most frequent
+such pair is by definition the real one; a decorative callout leads into
+a different kind of text and there are an order of magnitude fewer of
+them. Measured on real data the gap is comfortable: on Živa the second
+real pair is at 79% of the first, on The MagPi the first decorative
+callout at 14%.
+
+Two iterations, both instructive:
+
+- **The first version took only the single most frequent number style.**
+  It worked on The MagPi; on Živa the article count fell from 37 to 23,
+  because Živa uses two equally valid sizes of number (9 and 10pt) and
+  half the entries were lost. Without a comparison against a second
+  magazine it would have gone unnoticed.
+- **The second version took only the single most frequent text style.**
+  The same mistake one step further on: Živa mixes title sizes too. Only
+  a threshold on the frequency of the whole pair, rather than of an
+  individual style, fits both.
+
+**Authors.** Splitting title from author by the colour of the first span
+is a purely Živa thing. The MagPi's contents do not list authors at all,
+so the section name ("Tutorials", "Project Showcase") was being produced
+as the author. A new `toc_has_authors` field turns it off. It is off for
+the adaptive profile too, deliberately: a missing author is an empty
+field, whereas a badly split title is a damaged title **and** an
+invented author at once.
+
+**A side fix:** `font_family()` did not understand an optical size in a
+font name, so `RobotoSerif-20ptRegular` and `RobotoSerif-Italic` came
+out as two different families. An italic run inside a title was then
+discarded as a foreign style.
+
+**Result.** The MagPi: 85 articles from three issues, no duplicate page,
+no invented author. Živa through the adaptive profile: 37 articles,
+exactly as many as the hand profile (previously 36), and 36 of the hand
+profile's 37 titles are contained verbatim in the adaptive ones. The
+hand profile's regression stays byte-identical.
+
+---
+
+## Phase 11 — English throughout
+
+The repository was written in Czech: comments, docstrings, CLI help and
+printed messages. For a public portfolio piece that is a barrier, so all
+of it is now English.
+
+What stays Czech is the part that is **data about Czech text** rather
+than prose, and translating it would break the parser:
+
+- Živa's footer keywords and imprint markers, and its filename pattern.
+- The Czech connectives in colour-scale legends
+  (`LEGEND_WORDS = {"do", "nad", "pod", "až"}`) and the Czech capitals
+  in the caption-lead and sentence-splitting regexes.
+- The Czech system prompt used to answer questions about a Czech
+  magazine, and the Czech chunk header and citation that Živa's profile
+  declares — the language of these follows the corpus, not the code.
+- The retrieval test queries in `tools/compare_models.py`: a retrieval
+  test has to be in the language of the documents.
+
+Two things came out of the translation rather than being cosmetic:
+
+- The chunk metadata header moved out of the `SourceProfile` default and
+  into `ziva.py`. The shared default is now English and Živa states its
+  Czech one explicitly, which makes the "the language follows the
+  corpus" rule visible instead of implied.
+- Source citations followed the same route: `citation_template`,
+  `page_single_label` and `page_range_label` moved into the profile.
+  Živa keeps its Czech citation ("str. 4-7, autoři: ...") and The MagPi
+  gets an English one with no year, because its issues are numbered
+  continuously.
+
+`tools/diag_kontaktni_adresy.py` became `tools/diag_contact_addresses.py`
+and gained a `--needle` argument, so it is no longer hard-wired to the
+one Živa entry it was written for.
+
+The Czech originals of the documentation are kept outside the repository
+for the author's own reference; the published versions are these.

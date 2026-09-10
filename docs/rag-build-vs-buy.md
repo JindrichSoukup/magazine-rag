@@ -1,114 +1,216 @@
-# RAG: build vs. buy v rámci větší organizace — tři otázky a odpovědi
+# RAG build vs. buy in a larger organisation — three questions
 
-Tři navazující otázky a odpovědi z konverzace o tom, co si z tříddenní práce na home-made RAG komponentách odnést pro někoho, kdo podobné věci řeší/manageuje/orchestruje ve větší organizaci/korporátu. Přesné citace, beze změny.
+Three follow-on questions and answers from a conversation about what
+three days of building home-made RAG components is worth to someone who
+has to run, manage or orchestrate work like this inside a larger
+organisation.
 
----
-
-## Otázka 1
-
-**Q:** Tři dny jsem strávil vytvářením home-made kompenent RAG. Co si z toho můžu vzít pro někoho, kdo by takové věci měl řešit/manageovat/orchestrovat v rámci větší organizace/korporátu?
-
-**A:**
-
-Dobrá otázka na destilaci — pojďme to rozebrat na věci, co jsou specifické pro *tenhle* projekt vs. co je obecně přenositelné pro řízení podobné práce ve větší organizaci.
-
-### 1. Nejdražší část práce je neviditelná v demo prezentacích
-
-Skoro celý čas šel do "nudné" části — parsování PDF, hranice článků, oprava zalomených slov. Embedding a vektorové vyhledávání (to, co vypadá "zajímavě" a co prodávají vendor demos) zabraly zlomek času. **Manažerský důsledek:** když někdo odhaduje timeline RAG projektu podle toho, jak rychle se dá "zapojit LangChain a Pinecone", odhaduje špatně — realistický odhad musí počítat s tím, že datově specifická práce se nedá dobře odhadnout předem, protože se objevuje až při kontaktu s reálnými daty.
-
-### 2. Tiché chyby jsou nebezpečnější než pády — a to je manažerský problém, ne jen technický
-
-Skoro žádný z bugů, co jsme našli (sdílené stránky, sloučený nesourodý text, `find_split_y` co nikdy nefungoval), nespadl s chybou. Kód běžel, tvářil se v pořádku, výsledek byl tiše špatně. **Přenositelná lekce:** "proběhlo to bez chyby" není přijatelné kritérium hotovosti u datové pipeline. Potřebujete explicitní, měřitelnou vrstvu důvěry (u nás `quality_flags` + souhrnný audit) jako **první-třídní deliverable**, ne dodatečnou kontrolu, kterou uděláte, "když zbude čas" — protože nezbyde.
-
-### 3. Cena iterace je sama o sobě designové rozhodnutí
-
-Každá oprava v extrakci znamenala přegenerovat celý archiv — hodiny výpočtu. Museli jsme si proto řešit checkpointing, `upsert` místo úplného přestavění indexu, testování na jednom čísle před spuštěním na 75. **Pro řízení týmu:** ptejte se dopředu "kolik stojí jedna iterace opravy", ne až když vám někdo řekne, že přegenerování zabere noc. Tohle přímo určuje, jak rychle se dá tým učit z chyb.
-
-### 4. Nástroje na diagnostiku nejsou overhead — jsou součástí práce
-
-Bokem vzniklo přes půl tuctu malých diagnostických skriptů (dump konkrétní stránky, souhrn nejistoty napříč archivem...). Nebyly plánované dopředu, vznikaly, jak se objevovaly konkrétní záhady. **Lekce pro plánování:** pokud v odhadu na "postavit datovou pipeline" není budget na "postavit nástroje na to, abych zjistil/a, proč pipeline dělá, co dělá", odhad je neúplný.
-
-### 5. Cena systému určuje hlavně vaše vlastní architektura, ne ceník vendora
-
-Když jsme počítali náklady, ukázalo se, že rozdíl mezi "levným" a "drahým" hostingem byl u nás zanedbatelný — to, co skutečně hýbe cenou, jsou **vaše vlastní rozhodnutí** (kolik kontextu posíláte do LLM, `promote_threshold`, velikost okna). **Pro někoho, kdo řídí rozpočet:** než vyjednávat slevu u vendora, podívejte se, jestli vlastní architektura neposílá 5× víc kontextu, než je potřeba.
-
-### 6. "Build vs. buy" není binární — je to otázka, kde přesně leží vaše diferenciace
-
-Zkusili jsme si nasimulovat, jak by se stejná data zpracovala obecným nástrojem (NotebookLM-styl) — a ukázalo se, že pro **generický** dotaz to funguje obstojně, ale pro cokoliv vyžadujícího přesnou citaci/hranice článků selhává úplně. **Přenositelně:** obecné nástroje jsou optimalizované na generický případ; pokud je vaše skutečná hodnota v přesnosti nad specifickými/nestandardními daty, "jen to nahrát do hotového nástroje" vás nedovede tam, kam potřebujete — ale zjistit tohle *předem*, ne po nasazení, vyžaduje malý prototyp/pilot, ne jen čtení marketingových materiálů.
-
-### 7. Rozhodnutí bez zdůvodnění se špatně dědí
-
-Celou dobu jsem vás nutil k rozhodnutím s explicitním "proč", ne jen "co" (embedding model, Chroma vs. FAISS, velikost chunků). Až budete psát dokumentaci/handoff pro tým, tohle je přesně to, co přežije — "proč jsme to udělali takhle" se ztrácí jako první, a je to přesně to, co potřebuje příští člověk, když se rozhodne to změnit.
+Translated from the Czech original; the substance is unchanged.
 
 ---
 
-## Otázka 2
+## Question 1
 
-**Q:** Takže opravdu existují situace, kde build může být jednoznačně lepší než buy?
+**Q:** I spent three days building home-made RAG components. What can I
+take from that for somebody who has to run, manage or orchestrate work
+like this inside a larger organisation?
 
 **A:**
 
-Ano, ale trochu jinak, než se to obvykle rámuje — a je to vlastně vidět přímo na tom, co jsme dnes udělali.
+A good question to distil. Let us separate what is specific to *this*
+project from what carries over to managing similar work at scale.
 
-### Klíčový postřeh: "build vs. buy" není jedna otázka, je to otázka **po vrstvách**
+### 1. The most expensive part of the work is invisible in demos
 
-Podívejte se, co jsme v tomhle projektu skutečně udělali:
+Almost all the time went into the "boring" part: parsing the PDF,
+article boundaries, repairing broken words. Embedding and vector search —
+the part that looks interesting and that vendor demos sell — took a
+fraction of it. **The management consequence:** anyone estimating a RAG
+project's timeline by how quickly one can "plug in LangChain and
+Pinecone" is estimating wrongly. A realistic estimate has to allow for
+data-specific work that cannot be scoped in advance, because it only
+appears on contact with real data.
 
-| vrstva | co jsme udělali | proč |
+### 2. Silent errors are more dangerous than crashes — and that is a management problem, not just a technical one
+
+Almost none of the bugs we found — shared pages, stylistically unrelated
+text merged into one block, a `find_split_y` that never worked — failed
+with an error. The code ran, looked fine, and the result was quietly
+wrong. **The transferable lesson:** "it ran without an error" is not an
+acceptable definition of done for a data pipeline. You need an explicit,
+measurable layer of confidence — here `quality_flags` plus a summary
+audit — as a **first-class deliverable**, not a check you do "if there
+is time left", because there will not be.
+
+### 3. The cost of an iteration is itself a design decision
+
+Every fix in extraction meant regenerating the whole archive: hours of
+computation. That is why we had to deal with checkpointing, with
+`upsert` rather than a full index rebuild, with testing on one issue
+before running over 75. **For running a team:** ask up front "what does
+one fix-and-check cycle cost", not once somebody tells you a regeneration
+takes overnight. That number directly determines how fast the team can
+learn from its mistakes.
+
+### 4. Diagnostic tools are not overhead — they are part of the work
+
+More than half a dozen small diagnostic scripts appeared along the way:
+dump a specific page, summarise uncertainty across the archive, and so
+on. None was planned; each appeared as a specific mystery did. **The
+planning lesson:** if an estimate for "build a data pipeline" contains no
+budget for "build the tools that tell me why the pipeline does what it
+does", the estimate is incomplete.
+
+### 5. What a system costs is mostly decided by your own architecture, not the vendor's price list
+
+When we worked the costs out, the difference between "cheap" and
+"expensive" hosting turned out to be negligible for us. What actually
+moves the bill is **your own decisions**: how much context you send to
+the LLM, the promote threshold, the window size. **For anyone holding a
+budget:** before negotiating a discount with a vendor, check whether your
+own architecture is sending five times more context than it needs to.
+
+### 6. "Build vs. buy" is not binary — it is a question of where exactly your differentiation sits
+
+We simulated how the same data would be handled by a general-purpose
+tool of the NotebookLM kind. For a **generic** question it works
+respectably; for anything requiring precise citation or article
+boundaries it fails outright. **Transferably:** general tools are
+optimised for the generic case. If your real value lies in accuracy over
+specific or non-standard data, "just upload it into a finished tool" will
+not get you where you need to be — but finding that out *beforehand*,
+rather than after deployment, takes a small prototype or pilot, not
+reading marketing material.
+
+### 7. Decisions without a reason are inherited badly
+
+Throughout, I pushed for decisions with an explicit "why", not just a
+"what": the embedding model, Chroma versus FAISS, the chunk size. When
+you come to write documentation or a handover for a team, that is
+exactly what survives. "Why we did it this way" is the first thing to be
+lost, and it is exactly what the next person needs when they decide to
+change it.
+
+---
+
+## Question 2
+
+**Q:** So are there really situations where build is unambiguously
+better than buy?
+
+**A:**
+
+Yes, but somewhat differently from how it is usually framed — and it is
+visible in what we did today.
+
+### The key observation: "build vs. buy" is not one question, it is a question **per layer**
+
+Look at what this project actually did:
+
+| Layer | What we did | Why |
 |---|---|---|
-| Embedding model | **koupili/použili** hotový (`multilingual-e5-base`) | commodity — nikdo nezíská výhodu tím, že si postaví vlastní transformer |
-| Vektorové vyhledávání | **koupili/použili** hotové (Chroma) | commodity — HNSW index si nikdo nepíše sám |
-| PDF parsování Živy, hranice článků, oprava sazečských chyb | **postavili** od nuly | tady žádný "buy" ani neexistuje |
+| Embedding model | **bought** (used a finished one, `multilingual-e5-base`) | a commodity — nobody gains an advantage by building their own transformer |
+| Vector search | **bought** (used a finished one, Chroma) | a commodity — nobody writes their own HNSW index |
+| Parsing Živa's PDFs, article boundaries, repairing typesetting slips | **built** from scratch | there is no "buy" here to begin with |
 
-Takže to, co jsme dnes nazvali "home-made RAG", je ve skutečnosti **z 80 % buy + z 20 % build** — jen ten build je ta viditelná, časově náročná část. Klíčová chyba v uvažování je předstírat, že "build vs. buy" je jedno rozhodnutí pro celý systém.
+So what we called a "home-made RAG" is in fact **80% buy and 20%
+build** — it is just that the build is the visible, time-consuming part.
+The key mistake in reasoning is to pretend "build vs. buy" is one
+decision for the whole system.
 
-### Kdy je build na té zbývající vrstvě jednoznačně správně
+### When build is unambiguously right on that remaining layer
 
-1. **Když generický nástroj daný problém neřeší vůbec, ne jen hůř.** Naše sdílené hraniční stránky, editorské typo (`CXLVIiI`), zalomení slov — žádný vendor nepostaví obecné řešení pro "specifika InDesign exportu 70 let starého českého časopisu". Tady není alternativa "buy" na stole — je to buď postavit si to, nebo se problém neřeší.
+1. **When a general tool does not solve the problem at all, not merely
+   less well.** Our shared boundary pages, editorial typos (`CXLVIiI`),
+   hyphenated word breaks — no vendor will build a general solution for
+   "the quirks of an InDesign export of a 70-year-old Czech magazine".
+   There is no "buy" option on the table here: either you build it, or
+   the problem goes unsolved.
 
-2. **Když je přesnost/dohledatelnost sama o sobě produkt, ne detail.** Pokud je hodnota vašeho systému "vím přesně, který autor a která strana", ne "nějaká odpověď z nějakého zdroje", pak "koupit obecný nástroj, co tohle nedělá" není o nic levnější varianta — je to jiný produkt, který neřeší vaše zadání.
+2. **When accuracy and traceability are the product, not a detail.** If
+   the value of your system is "I know exactly which author and which
+   page", not "some answer from some source", then buying a general tool
+   that does not do that is not the cheaper option — it is a different
+   product that does not address your brief.
 
-3. **Když potřebujete auditovatelnost, kterou black-box nástroj nedá.** `quality_flags` fungují, protože víme přesně, co se stalo uvnitř. To se nedá dostat z hostovaného "nahraj PDF, zeptej se" nástroje — nemáte přístup dovnitř.
+3. **When you need auditability a black box cannot give you.**
+   `quality_flags` work because we know exactly what happened inside.
+   You cannot get that from a hosted "upload a PDF, ask a question"
+   tool: you have no access to the inside.
 
-### Ale — a tohle je důležité pro poctivost odpovědi
+### But — and this matters for an honest answer
 
-"Build je správně" **neznamená "je to zadarmo"**. Pořád to nese náklad — na každou opravu jsme museli přegenerovat celý archiv, udržovat diagnostiku, testovat regresi. Rozhodnutí stavět tuhle vrstvu je rozhodnutí **přijmout tenhle údržbový náklad natrvalo**, ne jednorázový výdaj. Manažersky správná otázka není "umíme si to postavit", ale "chceme tenhle typ údržby vlastnit dlouhodobě, nebo radši zaplatit někomu, kdo to (hůř, ale) udělá za nás".
+"Build is right" **does not mean "it is free"**. It still carries a cost:
+every fix meant regenerating the whole archive, maintaining the
+diagnostics, running the regression. Deciding to build this layer is
+deciding to **take on that maintenance cost permanently**, not to make a
+one-off outlay. The right management question is not "can we build it",
+but "do we want to own this kind of maintenance long term, or would we
+rather pay someone to do it for us, worse".
 
-**Shrnutí:** build je jednoznačně lepší přesně tam, kde se vaše diferenciace potkává s idiosynkrazií vašich dat — a to je užší množina případů, než "build je obecně lepší". Většina RAG stacku (embedding, vektorové úložiště, LLM) zůstává komoditou, kde buy dává smysl skoro vždy.
+**In short:** build is unambiguously better exactly where your
+differentiation meets the idiosyncrasy of your data — and that is a
+narrower set of cases than "build is generally better". Most of a RAG
+stack (embedding, the vector store, the LLM) stays a commodity, where
+buy makes sense almost always.
 
 ---
 
-## Otázka 3
+## Question 3
 
-**Q:** Takže po této zkušenosti vím, že RAG ve smyslu buy nemusí být jen celý blackbox (typu notebookLM) ale dá se to kupovat po částech ...
+**Q:** So after this experience I know that RAG in the "buy" sense need
+not be one black box, of the NotebookLM kind — it can be bought in
+pieces.
 
 **A:**
 
-Přesně tak — a je to vlastně přirozené pokračování té vrstvové úvahy z minula. Škála **není** "black box vs. postav si všechno", je to spektrum, kde si vybíráte **po vrstvách**, kterou koupíte hotovou a kterou postavíte.
+Exactly — and it is a natural continuation of the per-layer reasoning.
+The scale is **not** "black box versus build everything"; it is a
+spectrum where you choose, **layer by layer**, which one to buy finished
+and which to build.
 
-### Celý RAG stack rozepsaný na vrstvy — a co se dá koupit na každé
+### The whole RAG stack written out by layer, and what can be bought at each
 
-| vrstva | co se dá koupit samostatně | co jsme udělali my |
+| Layer | What can be bought separately | What we did |
 |---|---|---|
-| **Parsování/ingest dokumentů** | Unstructured.io, LlamaParse, Google Document AI Layout Parser — služby specificky na "PDF → čisté chunky" | postaveno na míru (`extract_blocks.py`) |
-| **Chunking strategie** | často součást parsovací služby výše, nebo frameworky (LangChain text splitters) | postaveno na míru (article-aware) |
-| **Embedding** | OpenAI/Cohere/Voyage API | koupeno-ekvivalent, jen lokálně hostěný model |
-| **Vektorové úložiště** | Pinecone/Weaviate/Qdrant Cloud | koupeno-ekvivalent (Chroma, lokálně) |
-| **Reranking** | Cohere Rerank API | neřešeno zatím |
-| **Orchestrace/"lepidlo"** | LangChain, LlamaIndex, Haystack | postaveno na míru (`assemble_context.py`) |
-| **Generování odpovědi** | Claude/GPT/Gemini API | koupeno |
-| **Celý balík najednou** | NotebookLM, Glean, ChatGPT s nahráním souboru | (to jsme si simulovali jako srovnání) |
+| **Document parsing / ingest** | Unstructured.io, LlamaParse, Google Document AI Layout Parser — services specifically for "PDF to clean chunks" | built to measure (`extract_blocks.py`) |
+| **Chunking strategy** | often part of the parsing service above, or a framework (LangChain text splitters) | built to measure (article-aware) |
+| **Embedding** | OpenAI/Cohere/Voyage APIs | bought-equivalent, only hosted locally |
+| **Vector store** | Pinecone/Weaviate/Qdrant Cloud | bought-equivalent (Chroma, local) |
+| **Reranking** | Cohere Rerank API | not addressed yet |
+| **Orchestration, the glue** | LangChain, LlamaIndex, Haystack | built to measure (`assemble_context.py`) |
+| **Answer generation** | Claude/GPT/Gemini APIs | bought |
+| **The whole thing at once** | NotebookLM, Glean, ChatGPT with a file upload | (what we simulated for comparison) |
 
-Všimněte si — **dokonce i tu vrstvu, co jsme dělali nejvíc ručně** (parsování PDF), lze dnes koupit jako samostatnou službu (Unstructured.io, LlamaParse). Otázka není "existuje to koupené", ale "řeší to *moje* konkrétní idiosynkrazie" — a to nezjistíte z marketingové stránky, zjistíte to pilotem na reálných datech (přesně to, co jsme si nakousli tím naivním srovnáním).
+Note that **even the layer we did most by hand**, PDF parsing, can now be
+bought as a standalone service. The question is not "does a bought
+version exist" but "does it solve *my* particular idiosyncrasies" — and
+you will not learn that from a marketing page, you learn it from a pilot
+on real data, which is precisely what our naive comparison started.
 
-### Proč tohle je důležitější postřeh, než zní
+### Why this observation matters more than it sounds
 
-Manažersky to znamená, že rozhodnutí "build vs. buy" se **neděje jednou na začátku projektu** — děje se **na každém švu** mezi vrstvami, a to průběžně, jak se dozvídáte víc o datech. Důsledky:
+For management it means the build-vs-buy decision **does not happen once
+at the start of a project**. It happens **at every seam** between layers,
+continuously, as you learn more about the data. Consequences:
 
-1. **Švy mezi koupenými komponentami jsou pořád vaše práce.** I kdybyste koupil/a embedding, vektor DB i LLM API zvlášť, to "lepidlo" mezi nimi (u nás `assemble_context.py` — kdy povýšit na celý článek, jak sestavit prompt) je pořád něco, co musíte navrhnout a vlastnit vy. Composabilita neznamená nulovou integrační práci.
+1. **The seams between bought components are still your work.** Even
+   having bought the embedding, the vector database and the LLM API
+   separately, the glue between them — here `assemble_context.py`: when
+   to promote to a whole article, how to assemble the prompt — is still
+   something you have to design and own. Composability does not mean
+   zero integration work.
 
-2. **Nakupovat po vrstvách vyžaduje, abyste znal/a svůj vlastní stack vrstvu po vrstvě** — přesně tu tabulku výš. Bez ní se snadno stane, že se "buduje", protože se nikdo nezeptal, jestli konkrétní vrstva už není komodita.
+2. **Buying layer by layer requires knowing your own stack layer by
+   layer** — precisely the table above. Without it, it is easy to end up
+   building because nobody asked whether that particular layer had
+   already become a commodity.
 
-3. **Cena flexibility je závislost na víc švech, ne na jednom vendorovi.** Fully black-box řešení (NotebookLM) má jeden bod selhání/vyjednávání. Composable stack jich má pět-šest — každý s vlastním rizikem výpadku/změny cen/API breaking change.
+3. **The price of flexibility is dependence on more seams, not on one
+   vendor.** A fully black-box solution has one point of failure and one
+   negotiation. A composable stack has five or six, each with its own
+   risk of an outage, a price change or a breaking API change.
 
-**Shrnutí:** ano — a tohle je asi nejpřenositelnější věc z celého projektu pro řízení podobné práce dál: než se ptát "build, nebo buy", rozepište si stack na vrstvy jako tu tabulku, a ptejte se to zvlášť pro každou.
+**In short:** yes — and this is probably the most transferable thing in
+the whole project. Rather than asking "build or buy", write the stack out
+by layer as in the table above, and ask the question separately for each.

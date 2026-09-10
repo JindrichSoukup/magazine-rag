@@ -1,120 +1,126 @@
-# magrag — archiv časopisu v PDF → korpus → RAG
+# magrag — a magazine's PDF archive → corpus → RAG
 
-Pipeline, která z ročníků časopisu v PDF udělá strukturovaný korpus článků
-s metadaty a citovatelnými čísly stránek, zaembedduje ho a odpovídá nad ním
-na otázky s odkazy na zdroj.
+A pipeline that turns a magazine's back-catalogue of PDFs into a
+structured corpus of articles with metadata and citable page numbers,
+embeds it, and answers questions over it with references to the source.
 
-Vzniklo to nad archivem přírodovědného měsíčníku **Živa** (75 čísel, 2 941
-článků, ~35 000 embedding chunků) a je to napsané tak, aby se to dalo
-přenést na jiný časopis výměnou jednoho souboru — viz [Profil
-zdroje](#profil-zdroje).
+It grew up on the archive of **Živa**, a Czech natural-history monthly
+(75 issues, 2,941 articles, ~35,000 embedding chunks), and is written so
+that moving it to another magazine means writing one file — see [Source
+profile](#source-profile).
 
-> **Práva.** V repozitáři není žádný obsah časopisu — ani PDF, ani z nich
-> vytažený text. Živa je autorsky chráněná (Academia / AV ČR), takže archiv
-> nejde zveřejnit; kód ano. Pro veřejné demo je připravený profil pro
-> [The MagPi](https://magpi.raspberrypi.com/issues), který vychází pod
-> licencí CC BY-NC-SA.
-
----
-
-## Dvě fáze, a ta druhá je pointa
-
-Projekt vznikl ve dvou oddělených etapách a každá učila něco jiného.
-
-**Nejdřív ručně, vrstvu po vrstvě**, aby bylo vidět, jaká rozhodnutí
-v takovém systému vlastně padají — včetně těch, která se udělají sama
-tichou výchozí hodnotou, když si jich člověk nevšimne. Výstupem téhle fáze
-nejsou jen skripty, ale dva texty, které dávají smysl i bez zbytku repozitáře:
-
-- [**Přehled rozhodnutí podle vrstvy**](docs/rag-decision-checklist.md) —
-  deset vrstev RAG systému a v každé seznam otázek, které se řeší.
-  Záměrně popisuje *co se rozhoduje*, ne jak rozhodnout; platí to na
-  libovolný RAG projekt, ne jen na tenhle.
-- [**RAG: build vs. buy**](docs/rag-build-vs-buy.md) — co si z ručního
-  stavění odnést, když podobnou věc někdo řídí ve větší organizaci.
-  Hlavní závěr: build vs. buy není jedna otázka, je to otázka **po
-  vrstvách**, a nejdražší práce je ta, která v demech vendorů není vidět.
-
-**Pak zobecnění**: z věci vyladěné na jeden časopis udělat systém
-s vyměnitelnými profily zdroje a ověřit to nasazením na druhý, nesouvisející
-časopis. Přenos je jediný poctivý test zobecnění a taky se to potvrdilo —
-vyplavalo pět chyb, které na prvním časopise nebyly vidět, a **ani jedna
-z nich nespadla**. Pipeline pokaždé doběhla a vypsala spokojený souhrn.
-
-Průběh obou fází, včetně toho, co se rozhodlo špatně, je v [deníku
-projektu](docs/project-log.md).
+> **Rights.** No magazine content lives in this repository — no PDFs, no
+> text extracted from them. Živa is under copyright (Academia / Czech
+> Academy of Sciences), so the archive cannot be published; the code can.
+> For a public demo there is a profile for
+> [The MagPi](https://magpi.raspberrypi.com/issues), which is published
+> under CC BY-NC-SA.
 
 ---
 
-## Proč to není `PyPDFLoader` + `RecursiveCharacterTextSplitter`
+## Two phases, and the second one is the point
 
-Protože to na časopisecké sazbě nefunguje. Zajímavá část tohoto projektu
-není embedding ani vektorové vyhledávání — ta je hotová za odpoledne.
-Zajímavá je cesta od „PDF" k „článek s autorem, ročníkem a číslem stránky":
+The project happened in two separate stints, and each taught something
+different.
 
-- Text nejde po stránkách, ale po **článcích**, a jeden článek se přes
-  stránky přelévá. Kde končí, se nedozvíte odjinud než z obsahu čísla.
-- Tištěné číslo stránky **není** číslo stránky v PDF, a rozdíl není
-  konstantní: v jednom čísle se běžně střídá arabské číslování (hlavní
-  články) → římské (příloha) → arabské znovu, pokaždé s jiným posunem.
-- Jedna fyzická stránka nese **konec jednoho článku a začátek dalšího**.
-  Řezat podle pořadí bloků nestačí — poslední sloupec často běží nezávisle
-  na zbytku stránky.
-- Zarovnaný text láme slova pomlčkou. Bez slepení zpátky se do korpusu
-  dostane `opaková-` a `ní` jako dvě různá slova.
-- Popisek obrázku uprostřed sloupce **přetne větu v půlce**, když se text
-  skládá naivně shora dolů.
+**First by hand, one layer at a time**, to find out what a system like
+this actually decides — including what it decides silently for you, by
+default, when you are not looking. The output of that phase is not only
+scripts but two notes that make sense without the rest of the repository:
 
-Každá z těch věcí je jeden konkrétní bug, který se našel až na reálných
-datech. Průběh je zapsaný v [deníku projektu](docs/project-log.md) —
-včetně toho, co se rozhodlo špatně a proč.
+- [**A layer-by-layer map of RAG decisions**](docs/rag-decision-checklist.md)
+  — ten layers of a RAG system and, in each, the questions that get
+  settled. It deliberately describes *what is decided*, not how to
+  decide it, and it applies to any RAG project, not just this one.
+- [**RAG: build vs. buy**](docs/rag-build-vs-buy.md) — what hands-on
+  building tells you when somebody has to run a thing like this inside a
+  larger organisation. The main conclusion: build vs. buy is not one
+  question, it is a question **per layer**, and the most expensive work
+  is the work vendor demos never show.
+
+**Then generalisation**: turn something tuned to one magazine into a
+system with swappable source profiles, and verify it by moving it onto a
+second, unrelated magazine. Porting is the only honest test of
+generalisation, and so it proved — five bugs surfaced that the first
+magazine could never have shown, and **not one of them crashed**. The
+pipeline finished every time and printed a contented summary.
+
+How both phases went, including what was decided wrongly, is in the
+[project log](docs/project-log.md).
 
 ---
 
-## Jak to funguje
+## Why this is not `PyPDFLoader` + `RecursiveCharacterTextSplitter`
+
+Because that does not work on magazine typesetting. The interesting part
+of this project is neither the embedding nor the vector search — those
+are an afternoon. The interesting part is the road from "a PDF" to "an
+article with its author, volume and page number":
+
+- Text does not run by page but by **article**, and an article spills
+  across pages. Where it ends is knowable only from the contents page.
+- The printed page number is **not** the PDF page number, and the
+  difference is not constant: within one issue the numbering routinely
+  alternates Arabic (main articles) → Roman (supplement) → Arabic again,
+  each with a different offset.
+- One physical page carries **the end of one article and the start of
+  the next**. Cutting by block order is not enough — the last column
+  often runs independently of the rest of the page.
+- Justified text breaks words with a hyphen. Without gluing them back,
+  the corpus receives `opaková-` and `ní` as two separate words.
+- A figure caption mid-column **cuts a sentence in half** when the text
+  is assembled naively from top to bottom.
+
+Every one of those is a specific bug found only on real data. The course
+of it is written up in the [project log](docs/project-log.md), including
+what was decided wrongly and why.
+
+---
+
+## How it works
 
 ```
- PDF čísla
+ an issue's PDF
     │
-    ├─► extract_blocks    bloky textu s fontem, velikostí, polohou a typem
+    ├─► extract_blocks    text blocks with font, size, position and type
     │                     (title/heading/other/body/caption/annotation)
-    ├─► create_toc        obsah čísla: článek → autor → tištěná stránka
-    ├─► build_page_map    tištěná stránka → stránka PDF (úseky číslování)
-    ├─► assign_articles   bloky → články, včetně sdílených hraničních stran
-    │                     + quality_flags tam, kde si pipeline není jistá
-    ├─► build_chunks      články → chunky ~1200 znaků s metadatovou hlavičkou
-    ├─► build_embeddings  chunky → vektory (lokální model, s checkpointy)
-    ├─► build_chroma      vektory → Chroma
-    ├─► assemble_context  dotaz → zdroje s citacemi (window + promote)
-    └─► answer            zdroje + otázka → odpověď LLM s odkazy na zdroj
+    ├─► create_toc        the contents: article → author → printed page
+    ├─► build_page_map    printed page → PDF page (numbering runs)
+    ├─► assign_articles   blocks → articles, shared boundary pages included
+    │                     + quality_flags wherever the pipeline is unsure
+    ├─► build_chunks      articles → ~1200-character chunks with a header
+    ├─► build_embeddings  chunks → vectors (local model, with checkpoints)
+    ├─► build_chroma      vectors → Chroma
+    ├─► assemble_context  query → sources with citations (window + promote)
+    └─► answer            sources + question → an LLM answer with references
 ```
 
-Krok `extract_blocks` je jediný, který ví, jak vypadá sazba konkrétního
-časopisu. Všechno za ním pracuje už jen se strukturou
-`{page, type, font, bbox, text}` a je přenositelné beze změny.
+`extract_blocks` is the only step that knows what a specific magazine's
+typesetting looks like. Everything after it works with the structure
+`{page, type, font, bbox, text}` alone and ports unchanged.
 
 ---
 
-## Rychlý start
+## Quick start
 
 ```bash
 git clone <url> && cd magrag
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
-pip install -e ".[dev]"          # jen extrakce z PDF
-pip install -r requirements.txt  # celá pipeline se zamčenými verzemi
+pip install -e ".[dev]"          # PDF extraction only
+pip install -r requirements.txt  # the whole pipeline, versions pinned
 ```
 
-Dejte PDF do jedné složky a pusťte celý archiv najednou:
+Put the PDFs in one directory and run the whole archive at once:
 
 ```bash
 python -m magrag.run_all --profile ziva --input ./pdf --output ./output
 ```
 
-Vznikne `output/<rok>-<číslo>/{blocks,toc,page_map,articles}.json` pro každé
-číslo (užitečné při ladění), plus souhrnný `output/corpus.json` a
-`output/chunks.jsonl`.
+That produces `output/<year>-<issue>/{blocks,toc,page_map,articles}.json`
+for each issue, useful when debugging, plus a combined
+`output/corpus.json` and `output/chunks.jsonl`.
 
-Zbytek cesty k odpovědím:
+The rest of the way to answers:
 
 ```bash
 python -m magrag.build_embeddings --input output/chunks.jsonl \
@@ -134,141 +140,156 @@ python -m magrag.answer --db-dir ./chroma_db --collection ziva \
     --chunks output/chunks.jsonl --corpus output/corpus.json
 ```
 
-`answer` bez `--query` běží interaktivně. S `--dry-run` vypíše hotový prompt
-a nic neposílá do API — hodí se na ladění retrievalu zadarmo.
+Without `--query`, `answer` runs interactively. With `--dry-run` it
+prints the finished prompt and sends nothing to the API — handy for
+tuning retrieval for free.
 
 ---
 
-## Profil zdroje
+## Source profile
 
-Všechno, čím se jeden časopis liší od jiného, je v jednom `SourceProfile`
-místo roztroušené po pěti skriptech: jména fontů a velikosti písma pro
-klasifikaci bloků, tvar běžící patičky, stránka s obsahem čísla, vzor
-pojmenování souborů, jazyk metadatové hlavičky a systémová instrukce.
+Everything that makes one magazine differ from another lives in a single
+`SourceProfile` instead of being scattered across five scripts: font
+names and point sizes for block classification, the shape of the running
+footer, which page carries the contents, the filename pattern, the
+language of the metadata header and the system prompt.
 
-| Profil | Sazba | Patička | Poznámka |
+| Profile | Typography | Footer | Note |
 |---|---|---|---|
-| `ziva` | ruční, absolutní velikosti | podle názvu časopisu | referenční, vyladěný na 75 čísel |
-| `magpi` | adaptivní | podle polohy na stránce | otevřená licence, vhodné pro demo |
-| `adaptive` | adaptivní | — | základ pro neznámý časopis |
+| `ziva` | hand-written, absolute sizes | by magazine name | the reference, tuned on 75 issues |
+| `magpi` | adaptive | by position on the page | open licence, suitable for a demo |
+| `adaptive` | adaptive | — | the starting point for an unknown magazine |
 
-**Adaptivní klasifikace** je odpověď na to, že u nového časopisu nikdo
-nezná jména fontů. Místo absolutních hodnot si pipeline spočítá, kolik
-znaků je vysázeno kterou kombinací rodiny a velikosti písma. Nejobjemnější
-kombinace je z definice běžný text — a všechna pravidla jsou pak relativní
-k ní („titulek je 1,7× větší než text"). Vážení podle znaků, ne podle počtu
-bloků, je podstatné: titulků je na stránce hodně kusů, ale málo textu.
+**Adaptive classification** is the answer to nobody knowing a new
+magazine's font names. Instead of absolute values the pipeline counts how
+many characters are set in each combination of font family and size. The
+most voluminous combination is by definition the body text, and every
+rule is then relative to it ("a title is 1.7x larger than the text").
+Weighting by characters rather than by block count matters: a page
+carries many titles but little of their text.
 
-Kolik se za přenositelnost platí, jde změřit: stejné číslo Živy zpracované
-oběma profily, kde adaptivní neví o Živě vůbec nic — ani jméno fontu, ani
-kde je obsah čísla, ani co stojí v patičce.
+What portability costs can be measured. The same issue of Živa processed
+by both profiles, where the adaptive one knows nothing about Živa — not
+the font name, not where the contents are, not what stands in the footer.
 
-| | ruční `ziva` | adaptivní |
+| | hand-written `ziva` | adaptive |
 |---|---|---|
-| nalezené články | 37 | 37 |
-| titulek obsažen v adaptivním | — | 36 z 37 |
-| bajtově shodný text článku | — | 20 z 37 |
-| články s `quality_flags` | 3 | 4 |
+| articles found | 37 | 37 |
+| title contained in the adaptive one | — | 36 of 37 |
+| byte-identical article text | — | 20 of 37 |
+| articles with `quality_flags` | 3 | 4 |
 
-Adaptivní profil najde tytéž články. Jeho titulky jsou ale delší: obsahují
-i řádek s autorem, protože obecný profil nemůže vědět, že obsah čísla
-autory uvádí zvlášť a odděluje je barvou. Rozdíly v textu článků jsou
-hranice odstavců, ne ztracený obsah.
+The adaptive profile finds the same articles. Its titles are longer,
+though: they include the author line, because a generic profile cannot
+know that the contents list authors separately and set them apart by
+colour. The differences in article text are paragraph boundaries, not
+lost content.
 
-### Ověřeno na druhém časopise
+### Verified on a second magazine
 
-Profil `magpi` je otestovaný na třech reálných číslech stažených z
-`magpi.raspberrypi.com/issues` (150, 152, 155; born-digital PDF, 132 stran).
-Bez jediné ručně zadané hodnoty o sazbě z nich pipeline vytáhne **85 článků
-a 656 chunků**, bez duplicit a bez vymyšlených autorů.
+The `magpi` profile is tested on three real issues downloaded from
+`magpi.raspberrypi.com/issues` (150, 152, 155; born-digital PDF, 132
+pages). Without a single hand-entered value about the typesetting, the
+pipeline pulls **85 articles and 656 chunks** out of them, with no
+duplicates and no invented authors.
 
-Nebylo to zadarmo. Cesta k tomu číslu ukázala pět chyb, které byly na Živě
-neviditelné, a **žádná z nich nespadla** — pipeline pokaždé doběhla a vypsala
-spokojený souhrn:
+It did not come free. The road to that number exposed five bugs the first
+magazine could never have shown, and **not one of them crashed** — the
+pipeline finished every time and printed a contented summary:
 
-| Nález | Proč to Živa nikdy neukázala |
+| Finding | Why Živa never showed it |
 |---|---|
-| obsah čísla uvádí `032`, patička `32` | Živa čísla stránek nedoplňuje nulami |
-| titulky nesou řídicí znak `U+0007` | ozdobná odrážka sázená symbolovým fontem |
-| číslo položky je slepené s tabulátorem a odrážkou | totéž |
-| obsah je rozložený přes tři stránky | Živa má obsah vždy na jedné |
-| na stránce s obsahem jsou troje různá čísla | Živa ozdobné upoutávky nemá |
+| the contents say `032`, the footer `32` | Živa does not zero-pad page numbers |
+| titles carry the control character `U+0007` | a decorative bullet set in a symbol font |
+| the entry number is glued to a tab and a bullet | likewise |
+| the contents are spread across three pages | Živa always has them on one |
+| the contents page carries three kinds of number | Živa has no decorative callouts |
 
-Poslední z nich je nejzajímavější. Vedle skutečných čísel stránek stojí
-v obsahu MagPi ozdobné upoutávky (velké bílé číslo s krátkým popiskem)
-a číslo samotné stránky s obsahem v patičce. Napevno zadat, které je které,
-nejde: MagPi mezi čísly 150 a 152 předělal grafiku včetně fontů, velikostí
-i formátu čísel. Řeší se to stejnou úvahou jako klasifikace bloků, jen
-o patro výš — hledá se **nejčastější dvojice „styl čísla + styl titulku
-hned za ním"**, protože obsah je seznam a ta dvojice se v něm opakuje
-u každé položky.
+The last of those is the most interesting. Beside the real page numbers,
+The MagPi's contents carry decorative callouts (a large white number with
+a short caption) and the number of the contents page itself in the
+footer. Hard-coding which is which does not work: The MagPi redesigned
+between issues 150 and 152, changing fonts, sizes and the number format.
+It is solved by the same reasoning as block classification, one storey
+up — looking for the **most frequent "number style + style of the title
+right after it" pair**, because the contents are a list and that pair
+repeats for every entry.
 
-### Přidání nového časopisu
+### Adding a new magazine
 
 ```bash
-python -m tools.inspect_fonts cesta/k/cislu.pdf
+python -m tools.inspect_fonts path/to/issue.pdf
 ```
 
-Vypíše histogram sazby s ukázkami textu, hotový návrh pravidel k vložení do
-profilu a kandidáty na běžící patičku. Na vzorovém čísle Živy z něj vypadne
-přesně to, co bylo původně odvozené ručně (`MeliorCE` @ 9 b jako běžný text,
-`živa 6/2014` a `ziva.avcr.cz` jako patička).
+It prints a typography histogram with sample text, a ready-made
+suggestion of rules to paste into a profile, and the candidates for the
+running footer. On the sample issue of Živa it produces exactly what was
+originally derived by hand (`MeliorCE` at 9pt as body text, `živa 6/2014`
+and `ziva.avcr.cz` as the footer).
 
-Pak zkopírujte `magrag/profiles/magpi.py`, upravte a zaregistrujte
-v `magrag/profiles/__init__.py`. Když se ruční kalibrace nevyplatí (časopis
-během archivu několikrát změnil grafiku), nechte `adaptive=True`.
+Then copy `magrag/profiles/magpi.py`, edit it, and register it in
+`magrag/profiles/__init__.py`. When hand calibration does not pay off,
+because the magazine redesigned several times over the archive, leave
+`adaptive=True`.
 
 ---
 
-## Reprodukovatelnost
+## Reproducibility
 
-- **Zamčené verze** v `requirements.txt`. PyMuPDF mezi verzemi mění, jak
-  dělí stránku na bloky, a to je vstup úplně všeho ostatního.
-- **Zlatý test** (`tests/test_pipeline_golden.py`) porovnává SHA-256 otisk
-  výstupu každé fáze proti zafixované hodnotě. Fixture neobsahuje obsah
-  časopisu, jen otisky a počty — na změnu reaguje stejně citlivě jako
-  porovnání textu, ale nezveřejňuje ani písmeno. Bez zdrojového PDF se sám
-  přeskočí:
+- **Pinned versions** in `requirements.txt`. PyMuPDF changes how it
+  splits a page into blocks between versions, and that is the input to
+  everything else.
+- **A golden test** (`tests/test_pipeline_golden.py`) compares a SHA-256
+  fingerprint of each stage's output against a pinned value. The fixture
+  holds no magazine content, only fingerprints and counts — it reacts to
+  a change as sensitively as comparing the text would, while publishing
+  not one letter. Without the source PDF it skips itself:
 
   ```bash
-  pytest -q                                      # 85 testů
-  MAGRAG_GOLDEN_PDF=cesta/k/cislu.pdf pytest -q  # včetně zlatého testu
+  pytest -q                                       # 105 tests
+  MAGRAG_GOLDEN_PDF=path/to/issue.pdf pytest -q   # including the golden test
   ```
 
-- **`quality_flags`** u každého článku přiznávají, kde se pipeline musela
-  spolehnout na fallback (`boundary_page_unverified`, `merged_fallback`, …).
-  Souhrn přes celý archiv: `python -m tools.summarize_quality_flags`.
-  Na Živě má aspoň jednu vlajku 8,8 % článků a 70 % z nich patří do jediné
-  dobře známé kategorie (administrativní zadní strana čísla).
+- **`quality_flags`** on every article admit where the pipeline had to
+  fall back on a guess (`boundary_page_unverified`, `merged_fallback`,
+  ...). For a summary across the archive:
+  `python -m tools.summarize_quality_flags output/corpus.json`. On Živa,
+  8.8% of articles carry at least one flag and 70% of those belong to a
+  single well-understood category, the administrative back matter of an
+  issue.
 
-Generovaná data (`output/`, `chroma_db/`, vektory) a zdrojová PDF jsou
-v `.gitignore`. Korpus Živy má 127 MB, chunky 95 MB a vektory 120 MB — přes
-limit GitHubu na jeden soubor, a hlavně to tam nepatří kvůli právům.
+Generated data (`output/`, `chroma_db/`, the vectors) and source PDFs are
+in `.gitignore`. Živa's corpus is 127 MB, the chunks 95 MB and the
+vectors 120 MB — over GitHub's per-file limit, and above all they do not
+belong there for rights reasons.
 
 ---
 
-## Struktura
+## Layout
 
 ```
-magrag/            pipeline (jeden modul na fázi)
-  profiles/        profily zdroje + systémové instrukce
-  typography.py    klasifikace bloků, ruční i adaptivní
-  console.py       UTF-8 na stdout (jinak spadne na první české hlášce)
-tools/             diagnostika a kalibrace, nepatří do produkčního běhu
-tests/             85 testů; zlatý test se bez PDF přeskočí
-docs/              deník projektu a poznámky k rozhodování o RAG
+magrag/            the pipeline (one module per stage)
+  profiles/        source profiles + system prompts
+  typography.py    block classification, hand-written and adaptive
+  console.py       UTF-8 on stdout (or it dies on the first message)
+tools/             diagnostics and calibration, not part of a production run
+tests/             105 tests; the golden test skips without a PDF
+docs/              the project log and notes on RAG decisions
 ```
 
-## Dokumentace
+## Documentation
 
-- [Deník projektu](docs/project-log.md) — co se stavělo, na co se přišlo
-  a proč se to rozhodlo takhle. Nejzajímavější čtení z celého repozitáře.
-- [RAG: build vs. buy](docs/rag-build-vs-buy.md) — co si z toho odnést,
-  když podobnou věc řídíte ve větší organizaci.
-- [Přehled rozhodnutí podle vrstvy](docs/rag-decision-checklist.md) — co se
-  v každé vrstvě RAG systému rozhoduje, explicitně nebo tiše defaultem.
+- [Project log](docs/project-log.md) — what was built, what turned up
+  and why it was decided that way. The most interesting read in the
+  repository.
+- [RAG: build vs. buy](docs/rag-build-vs-buy.md) — what to take from
+  this if you are running something similar in a larger organisation.
+- [A layer-by-layer map of RAG decisions](docs/rag-decision-checklist.md)
+  — what gets decided in each layer of a RAG system, explicitly or
+  silently by default.
 
 ## Licence
 
-Kód: MIT (viz [LICENSE](LICENSE)). Obsah zpracovávaných časopisů licence
-tohoto projektu **nepokrývá** — řídí se právy vydavatele.
+Code: MIT (see [LICENSE](LICENSE)). The licence of this project does
+**not** cover the content of the magazines it processes — that is
+governed by the publishers' rights.

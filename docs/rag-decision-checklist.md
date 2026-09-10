@@ -1,115 +1,121 @@
-# RAG — přehled rozhodnutí a parametrů podle vrstvy
+# RAG — a layer-by-layer map of the decisions
 
-Referenční seznam otázek, které se řeší (explicitně, nebo tiše defaultní hodnotou) v každé vrstvě RAG systému. Pro každý bod: co se rozhoduje, ne jak přesně rozhodnout — to je vždy na konkrétním případu.
+A reference list of the questions that get settled — explicitly, or
+silently by a default value — in every layer of a RAG system. Each entry
+says *what* is being decided, not how to decide it: that always depends
+on the case at hand.
 
 ---
 
-## 1. Ingest / parsování dokumentů
+## 1. Ingest and document parsing
 
-- Jaké formáty musí systém zvládnout (PDF, DOCX, HTML, obrázky/OCR, tabulky)?
-- Je potřeba OCR? Jak dobrá musí být jeho přesnost?
-- Jak se zachází s layoutem — víceloupcový text, tabulky, hlavičky/patičky?
-- Jak se zachovává struktura (nadpisy, hierarchie sekcí)?
-- Jak se extrahují metadata (autor, datum, název, číslo stránky)?
-- Jak se odstraňuje/označuje boilerplate (opakující se hlavičky, patičky, čísla stránek)?
-- Jak se zachází s obrázky, popisky, anotacemi — jsou součástí textu, nebo oddělené?
-- Podpora více jazyků v jednom dokumentu?
-- Build vs. buy: vlastní parser, nebo služba (Unstructured.io, LlamaParse, Document AI Layout Parser)?
+- Which formats must the system handle (PDF, DOCX, HTML, images/OCR, tables)?
+- Is OCR needed? How accurate does it have to be?
+- How is layout handled — multi-column text, tables, headers and footers?
+- How is structure preserved (headings, section hierarchy)?
+- How is metadata extracted (author, date, title, page number)?
+- How is boilerplate removed or marked (repeating headers, footers, page numbers)?
+- How are images, captions and annotations treated — part of the text, or separate?
+- Several languages inside one document?
+- Build vs. buy: your own parser, or a service (Unstructured.io, LlamaParse, Document AI Layout Parser)?
 
 ## 2. Chunking
 
-- Cílová velikost chunku (tokeny/znaky) — kompromis granularita vs. konzistence pro embedding.
-- Metoda: pevná velikost, rekurzivní/hierarchická, sémantická (podle odstavců/vět), podle struktury dokumentu (podle nadpisů/sekcí)?
-- Překryv mezi chunky — kolik, a jak (posledních N znaků, celé odstavce)?
-- Co s tabulkami, kódem, obrázky/popisky — vlastní chunky, nebo součást okolního textu?
-- Kontextová hlavička u chunku (metadata vepsaná do embedovaného textu) — ano/ne, co všechno?
-- Jaká metadata se ukládají ke chunku (zdroj, stránka, sekce, datum, autor, přístupová práva)?
-- Hierarchické/"parent-child" chunky (malý chunk pro vyhledání, větší pro kontext)?
-- Co dělat s chunkem, co přesáhne tokenový limit embedding modelu (zahodit/ořezat/rozdělit)?
-- Jak nakládat s obálkovými/nevztaženými částmi dokumentu (titulní strana, rejstřík, reklama)?
+- Target chunk size (tokens or characters) — granularity against consistency for embedding.
+- Method: fixed size, recursive/hierarchical, semantic (by paragraph or sentence), or by document structure (by heading or section)?
+- Overlap between chunks — how much, and how (the last N characters, whole paragraphs)?
+- What about tables, code, images and captions — chunks of their own, or part of the surrounding text?
+- A contextual header on the chunk (metadata written into the embedded text) — yes or no, and how much?
+- What metadata is stored with a chunk (source, page, section, date, author, access rights)?
+- Hierarchical "parent-child" chunks (a small chunk to find it, a larger one for context)?
+- What happens to a chunk that exceeds the embedding model's token limit (drop, truncate, split)?
+- How are the cover and unrelated parts of a document handled (title page, index, advertising)?
 
 ## 3. Embedding
 
-- Model: lokální (open-weight) vs. hostovaný přes API?
-- Jazyková způsobilost — monolingvální vs. multilingvální model, jak dobře pokrývá cílový jazyk?
-- Dimenze vektoru — kompromis přesnost/náklady na úložiště a rychlost vyhledávání.
-- Normalizace vektorů (jednotková délka) — ovlivňuje, jaká metrika podobnosti dává smysl.
-- Asymetrické embeddingy (rozdílný prefix/instrukce pro dotaz vs. pro dokument)?
-- Přesnost čísel (float32/float16/kvantizace) — úložiště vs. kvalita.
-- Batch size / propustnost při zpracování velkého korpusu.
-- Co se stane při změně modelu — nutnost přeindexovat celý korpus?
-- Cena za token (pokud API), latence, rate limity.
-- Checkpointing/odolnost dlouhého indexačního běhu proti přerušení.
+- Model: local (open-weight) or hosted behind an API?
+- Language competence — monolingual or multilingual, and how well does it cover the target language?
+- Vector dimension — accuracy against storage cost and search speed.
+- Vector normalisation (unit length) — it determines which similarity metric makes sense.
+- Asymmetric embeddings (a different prefix or instruction for the query and for the document)?
+- Numeric precision (float32/float16/quantisation) — storage against quality.
+- Batch size and throughput when processing a large corpus.
+- What happens when the model changes — must the whole corpus be reindexed?
+- Cost per token (if an API), latency, rate limits.
+- Checkpointing: how a long indexing run survives interruption.
 
-## 4. Vektorové úložiště
+## 4. Vector store
 
-- Hostovaná služba vs. self-hosted (knihovna/kontejner)?
-- Typ indexu: exaktní (flat) vs. aproximativní (HNSW, IVF, PQ) — kompromis přesnost/rychlost/škálovatelnost.
-- Podpora metadata filtrů (a jestli se filtruje před, nebo až po vektorovém vyhledávání)?
-- Hybridní vyhledávání (vektor + klíčová slova/BM25) — ano/ne, jak se váží?
-- Multi-tenancy / izolace dat mezi uživateli nebo odděleními?
-- Strategie aktualizace: `upsert` po jednotlivých záznamech, vs. kompletní znovu-sestavení indexu?
-- Škálovatelnost (sharding, replikace) při růstu objemu dat.
-- Zálohování/perzistence dat.
-- Cenový model (úložiště podle GB, poplatky za čtení/zápis, paušální minima).
+- A hosted service or self-hosted (a library or a container)?
+- Index type: exact (flat) or approximate (HNSW, IVF, PQ) — accuracy against speed and scale.
+- Support for metadata filters (and whether filtering happens before or after the vector search)?
+- Hybrid search (vector plus keyword/BM25) — yes or no, and how are the two weighted?
+- Multi-tenancy and isolation of data between users or departments?
+- Update strategy: `upsert` per record, or a complete rebuild of the index?
+- Scalability (sharding, replication) as the data grows.
+- Backup and persistence.
+- Pricing model (storage per GB, read/write charges, flat minimums).
 
-## 5. Strategie vyhledávání (retrieval)
+## 5. Retrieval strategy
 
-- `top_k` — kolik kandidátů se vytáhne před dalším zpracováním?
-- Metrika podobnosti (kosinová, skalární součin, eukleidovská vzdálenost)?
-- Metadata filtry v dotazu (rok, autor, typ dokumentu, přístupová práva)?
-- Transformace dotazu před vyhledáním (rozšíření dotazu, HyDE, více variant dotazu)?
-- Reranking — druhá, přesnější fáze (cross-encoder) nad prvotními kandidáty; ano/ne, jaký model?
-- Diverzita výsledků (např. MMR) — vyhýbat se vracení skoro identických chunků?
-- Agregace na úrovni dokumentu — kdy vrátit jen chunk, kdy celý dokument/sekci?
-- Kolik okolního kontextu přibalit ke každému zásahu (okno sousedních chunků)?
-- Deduplikace překrývajících se/opakujících se výsledků?
-- Váha mezi vektorovým a klíčovým vyhledáváním u hybridního přístupu?
+- `top_k` — how many candidates are pulled before further processing?
+- Similarity metric (cosine, dot product, Euclidean distance)?
+- Metadata filters in the query (year, author, document type, access rights)?
+- Query transformation before search (query expansion, HyDE, several query variants)?
+- Reranking — a second, more accurate pass (a cross-encoder) over the initial candidates; yes or no, and which model?
+- Result diversity (e.g. MMR) — should near-identical chunks be avoided?
+- Document-level aggregation — when to return just a chunk, when a whole document or section?
+- How much surrounding context to attach to each hit (a window of neighbouring chunks)?
+- Deduplication of overlapping or repeating results?
+- The weighting between vector and keyword search in a hybrid approach?
 
-## 6. Sestavení promptu / kontextu pro LLM
+## 6. Assembling the prompt and context for the LLM
 
-- Systémový prompt — pravidla groundingu, formát citací, tón, jazyk odpovědi.
-- Kolik tokenů kontextu poslat (rozpočet vstupu vs. místo na odpověď)?
-- Formát citací — inline odkaz na zdroj, seznam na konci, obojí?
-- Jak nakládat s kontextem, co otázku nepokrývá vůbec/jen částečně?
-- Pořadí chunků v promptu (nejrelevantnější první/poslední — modely mívají slabší pozornost uprostřed dlouhého kontextu)?
-- Co cachovat (opakující se systémový prompt/instrukce) kvůli nákladům?
+- The system prompt — grounding rules, citation format, tone, language of the answer.
+- How many tokens of context to send (input budget against room for the answer)?
+- Citation format — an inline reference, a list at the end, or both?
+- What to do with context that does not cover the question at all, or only partly?
+- The order of chunks in the prompt (most relevant first or last — models tend to attend less to the middle of a long context)?
+- What to cache (a repeating system prompt or instruction) for cost?
 
-## 7. Generování odpovědi (LLM)
+## 7. Answer generation (the LLM)
 
-- Který model — kompromis kvalita/cena/latence (nemusí to být nejsilnější dostupný model)?
-- Teplota a další parametry vzorkování?
-- Maximální délka odpovědi?
-- Streamování odpovědi, nebo čekat na celek?
-- Potřeba strukturovaného výstupu (JSON, nástroje/function calling)?
-- Záložní model/strategie při výpadku nebo zahlcení primárního?
+- Which model — quality against cost and latency (it need not be the strongest one available)?
+- Temperature and the other sampling parameters?
+- Maximum answer length?
+- Stream the answer, or wait for the whole thing?
+- Is structured output needed (JSON, tools/function calling)?
+- A fallback model or strategy when the primary one is down or saturated?
 
-## 8. Evaluace a kvalita
+## 8. Evaluation and quality
 
-- Jaké metriky sledovat (přesnost/úplnost retrievalu, věrnost odpovědi zdroji, relevance)?
-- Jak vzniká testovací sada (ručně sestavené otázky se známou odpovědí, nebo automaticky)?
-- Automatizované vs. lidské hodnocení odpovědí?
-- Průběžné monitorování v provozu (drift kvality, zpětná vazba uživatelů)?
-- Jak se měří a hlásí důvěryhodnost/nejistota u zpracovaných dat (viz `quality_flags` v tomhle projektu)?
+- Which metrics to track (retrieval precision and recall, faithfulness of the answer to its sources, relevance)?
+- How is the test set built (hand-written questions with known answers, or generated)?
+- Automated or human evaluation of the answers?
+- Ongoing monitoring in production (quality drift, user feedback)?
+- How is the trustworthiness or uncertainty of the processed data measured and reported (see `quality_flags` in this project)?
 
-## 9. Provoz a infrastruktura
+## 9. Operations and infrastructure
 
-- Požadavky na latenci (real-time chat vs. dávkové zpracování)?
-- Sledování a rozpočet nákladů (kde přesně utrácíte — embedding, úložiště, generování)?
-- Frekvence a proces reindexace při aktualizaci zdrojových dat?
-- Verzování — co se stane se starým indexem při změně embedding modelu?
-- Bezpečnost/soukromí (citlivá data, řízení přístupu na úrovni dokumentu/chunku)?
-- Požadavky na rezidenci dat / compliance?
+- Latency requirements (real-time chat against batch processing)?
+- Cost tracking and budget (where exactly the money goes — embedding, storage, generation)?
+- How often and by what process is the index rebuilt when the source data changes?
+- Versioning — what happens to the old index when the embedding model changes?
+- Security and privacy (sensitive data, access control at document or chunk level)?
+- Data residency and compliance requirements?
 
-## 10. Guardrails a dohledatelnost
+## 10. Guardrails and traceability
 
-- Detekce/omezení halucinací (odpovědi mimo dodaný kontext)?
-- Ověřování, že citace v odpovědi skutečně odpovídají použitým zdrojům?
-- Filtrování nevhodného obsahu?
-- Jak systém reaguje, když poctivá odpověď je "nevím" — je to podporované, nebo se model tlačí k odpovědi za každou cenu?
+- Detecting and limiting hallucination (answers outside the supplied context)?
+- Verifying that the citations in an answer really correspond to the sources used?
+- Filtering inappropriate content?
+- How does the system behave when the honest answer is "I don't know" — is that supported, or is the model pushed to answer at any cost?
 
 ---
 
-## Průřezová otázka nad celým seznamem
+## The question that cuts across the whole list
 
-Pro každou vrstvu: **build, nebo buy** — a pokud buy, od koho a za jakou cenu/závislost? (Viz předchozí diskuze — tohle se řeší zvlášť pro každou vrstvu, ne jednou za celý systém.)
+For every layer: **build or buy** — and if buy, from whom, at what price
+and at what dependency? This gets settled separately for each layer, not
+once for the system as a whole. See
+[RAG: build vs. buy](rag-build-vs-buy.md).
