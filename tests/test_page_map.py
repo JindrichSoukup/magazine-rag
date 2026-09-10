@@ -168,3 +168,25 @@ def test_a_long_run_of_roman_letters_is_not_a_page_number():
     shluk písmen I/V/X/L/C/D/M - a u detekce podle polohy se takový
     řetězec reálně objeví."""
     assert label_to_int("x" * 50) == (None, None)
+
+
+# --- sjednocení zápisu popisku --------------------------------------------
+
+def test_normalize_label_strips_leading_zeros():
+    """Reálný případ (MagPi): obsah čísla uvádí "032", běžící patička jen
+    "32". Bez sjednocení se článek nenamapuje na žádnou stránku, i když je
+    číslování detekované úplně bez chyby - a nespadne přitom nic."""
+    from magrag.build_page_map import normalize_label
+    assert normalize_label("032") == "32"
+    assert normalize_label("32") == "32"
+
+
+def test_normalize_label_uppercases_roman():
+    from magrag.build_page_map import normalize_label
+    assert normalize_label("cxxxiii") == "CXXXIII"
+
+
+def test_normalize_label_leaves_unknown_shapes_alone():
+    """Co se nepodaří rozpoznat, se nesmí tiše zahodit."""
+    from magrag.build_page_map import normalize_label
+    assert normalize_label("A-12") == "A-12"

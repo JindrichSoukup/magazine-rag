@@ -144,6 +144,24 @@ kde je obsah čísla, ani co stojí v patičce.
 Jeden článek chybí, protože se nepodařilo namapovat jeho tištěné číslo
 stránky. Zbylé rozdíly v textu jsou hranice odstavců, ne ztracený obsah.
 
+### Ověřeno na druhém časopise
+
+Profil `magpi` je otestovaný na třech reálných číslech stažených z
+`magpi.raspberrypi.com/issues` (150, 152, 155; born-digital PDF, 132 stran).
+Bez jediné ručně zadané hodnoty o sazbě z nich pipeline vytáhne **92 článků
+a 674 chunků**. Cesta k tomu číslu ukázala tři chyby, které byly na Živě
+neviditelné:
+
+| Nález | Proč to Živa nikdy neukázala |
+|---|---|
+| obsah čísla uvádí `032`, patička `32` | Živa čísla stránek nedoplňuje nulami |
+| titulky nesou řídicí znak `U+0007` | ozdobná odrážka sázená symbolovým fontem |
+| obsah je rozložený přes tři stránky | Živa má obsah vždy na jedné |
+
+Každá z nich se projevila **tiše**: nic nespadlo, jen jich pipeline našla
+10 místo 92. Přesně proto stojí za to přenést pipeline na druhý zdroj, i když
+na tom prvním funguje.
+
 ### Přidání nového časopisu
 
 ```bash

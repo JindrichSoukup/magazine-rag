@@ -73,6 +73,7 @@ from pathlib import Path
 
 from magrag import profiles
 from magrag.console import setup_console
+from magrag.build_page_map import normalize_label
 from magrag.extract_blocks import looks_like_word_break, HYPHEN_BREAK_RE
 
 COLUMN_GAP = 40  # pt; x0-gap bigger than this starts a new column cluster
@@ -341,7 +342,9 @@ def assemble_articles(blocks, toc, label_to_page, profile, year=None, issue=None
     # 1) resolve + sort TOC into real reading order ------------------------
     resolved = []
     for entry in toc:
-        pdf_page = label_to_page.get(entry["printed_page"])
+        # přes normalize_label, protože obsah čísla a patička nemusí
+        # tentýž popisek zapisovat stejně ("032" vs "32") - viz tam
+        pdf_page = label_to_page.get(normalize_label(entry["printed_page"]))
         if pdf_page is None:
             print(f"  [warn] could not resolve printed page "
                   f"{entry['printed_page']!r} for {entry['title']!r} - skipping")

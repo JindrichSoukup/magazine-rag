@@ -93,6 +93,22 @@ def int_to_label(scheme: str, value: int) -> str:
     return str(value) if scheme == "arabic" else int_to_roman(value)
 
 
+def normalize_label(label: str) -> str:
+    """Sjednoť zápis popisku stránky na kanonický tvar.
+
+    Nutné proto, že tentýž popisek přichází ze dvou nezávislých míst
+    a nemusí být zapsaný stejně. Reálný případ (MagPi): obsah čísla uvádí
+    "032" s vedoucí nulou, běžící patička na stránce jen "32" - a bez
+    normalizace se článek nenamapuje na žádnou stránku, i když je
+    číslování jinak detekované úplně bez chyby. Stejná úvaha platí pro
+    velikost písmen u římských číslic.
+
+    Neznámý tvar se vrací beze změny, ať se nic tiše neztratí.
+    """
+    scheme, value = label_to_int(str(label).strip())
+    return int_to_label(scheme, value) if scheme else str(label).strip()
+
+
 def extract_label(text: str, profile):
     """Vrať token s číslem stránky schovaný v běžící hlavičce/patičce,
     nebo None, když to jako patička nevypadá.

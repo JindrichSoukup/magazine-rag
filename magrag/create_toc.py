@@ -28,10 +28,26 @@ from magrag.console import setup_console
 # je (prázdné toc_page_indices) - viz find_toc_pages().
 TOC_SEARCH_PAGES = 8
 TOC_MIN_ENTRIES = 5
+# Jak hustá musí být další stránka oproti té nejlepší, aby se taky
+# považovala za část obsahu (obsah bývá rozložený přes dvoustranu).
+TOC_PEER_RATIO = 0.4
+
+
+def strip_control_chars(text: str) -> str:
+    """Nahraď řídicí znaky mezerou.
+
+    Do textu se dostávají z ozdobných glyfů sázených symbolovým fontem -
+    reálný případ (MagPi): odrážka před každou položkou obsahu vyjde
+    z PDF jako U+0007. V titulku článku nemá co dělat a rozbíjí porovnání
+    titulku z obsahu s nadpisem nalezeným v těle čísla (texts_match
+    v assign_articles). Řeší se to porovnáním znaků, ne regulárním
+    výrazem s rozsahem - ten se špatně čte a snadno se v něm udělá chyba.
+    """
+    return "".join(" " if ch < " " or ch == "\x7f" else ch for ch in text)
 
 
 def clean(text):
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", strip_control_chars(text)).strip()
 
 
 def remove_footer(text, profile):
@@ -125,23 +141,31 @@ def count_toc_entries(page, profile):
 
 
 def find_toc_pages(doc, profile):
-    """Najdi stránku s obsahem čísla, když ji profil neurčuje napevno.
+    """Najdi stránky s obsahem čísla, když je profil neurčuje napevno.
 
     U známého časopisu je obsah vždy na stejné fyzické stránce a hádat se
     nemá co (`toc_page_indices` v profilu). U neznámého to nikdo předem
-    neví, takže se prohledá začátek čísla a vyhraje stránka s nejvíc
-    položkami - obsah je z definice nejhustší nakupení čísel stránek
-    v celém čísle. Prahem `TOC_MIN_ENTRIES` se odliší skutečný obsah od
-    stránky, kde se pár čísel sešlo náhodou.
+    neví, takže se prohledá začátek čísla a hledá se nejhustší nakupení
+    čísel stránek - obsah je takové nakupení z definice.
+
+    **Stránek je víc než jedna.** Obsah bývá rozložený přes dvoustranu,
+    u tlustšího čísla i přes tři stránky proložené inzercí (reálně: MagPi
+    má obsah na stranách 5, 6 a 8). Vzít jen tu nejlepší znamená přijít
+    o dvě třetiny čísla - a nepozná se to jako chyba, protože zbytek
+    pipeline poslušně zpracuje to, co dostal.
+
+    Práh je dvojí: absolutní `TOC_MIN_ENTRIES` odliší obsah od stránky,
+    kde se pár čísel sešlo náhodou, a relativní `TOC_PEER_RATIO` k té
+    nejlepší stránce přibere její protějšky, ale ne stránku s jedním
+    zatoulaným číslem.
     """
-    best_page, best_count = None, 0
-    for i in range(min(TOC_SEARCH_PAGES, doc.page_count)):
-        count = count_toc_entries(doc[i], profile)
-        if count > best_count:
-            best_page, best_count = i, count
-    if best_page is None or best_count < TOC_MIN_ENTRIES:
+    counts = {i: count_toc_entries(doc[i], profile)
+              for i in range(min(TOC_SEARCH_PAGES, doc.page_count))}
+    best = max(counts.values(), default=0)
+    if best < TOC_MIN_ENTRIES:
         return ()
-    return (best_page,)
+    threshold = max(TOC_MIN_ENTRIES, best * TOC_PEER_RATIO)
+    return tuple(i for i in sorted(counts) if counts[i] >= threshold)
 
 
 def build_toc(pdf_path, profile, toc_page_indices=None):

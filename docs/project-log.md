@@ -197,3 +197,56 @@ typ selhání, který se bez porovnání se známým výsledkem nepozná, proto�
 nic nespadne. Ošetřeno dvakrát: adaptivní profil používá `"position"`,
 a `is_footer_block()` u strategie `"keyword"` bez klíčových slov vrací
 `False` místo toho, aby za patičku prohlásila každý malý text na stránce.
+
+---
+
+## Fáze 9 — Ověření na druhém časopise (The MagPi)
+
+Test toho, jestli profily zdroje opravdu fungují, nebo jen vypadají hezky.
+Tři reálná čísla MagPi (150, 152, 155), born-digital PDF, 132 stran, žádná
+ručně zadaná hodnota o sazbě.
+
+**Postup byl 10 → 39 → 92 článků**, přičemž každý skok odhalil chybu, kterou
+Živa nemohla ukázat, a — to je na tom podstatné — **žádná z nich nespadla**.
+Pipeline pokaždé doběhla, vypsala souhrn a tvářila se spokojeně.
+
+1. **Popisky stránek se nepotkaly.** Obsah MagPi uvádí `032`, patička na
+   stránce `32`. Mapování stránek přitom fungovalo dokonale (jeden souvislý
+   úsek, posun 0, 97 ze 132 stránek detekováno přímo) — jen se na sebe obě
+   strany nenapojily. Oprava: `normalize_label()` sjednotí zápis na
+   kanonický tvar na obou koncích. Živa nuly nedoplňuje, takže tam takový
+   nesoulad nikdy nevznikl.
+
+2. **Řídicí znaky v titulcích.** Ozdobná odrážka před položkou obsahu vyjde
+   z PDF jako `U+0007` a zůstala v titulku. Rozbíjelo to textové porovnání
+   titulku z obsahu s nadpisem nalezeným v těle čísla (`texts_match`).
+   Oprava v `clean()`; řeší se porovnáním znaků, ne regulárním výrazem
+   s rozsahem — ten se špatně čte a snadno se v něm udělá chyba.
+
+3. **Obsah čísla je rozložený přes tři stránky.** `find_toc_pages()` brala
+   jen tu nejlepší, takže se dvě třetiny čísla nikdy nezpracovaly. Oprava:
+   dvojí práh, absolutní (odliší obsah od stránky s pár zatoulanými čísly)
+   a relativní k nejlepší stránce (přibere její protějšky). U čísla 150 to
+   navíc opravilo případ, kdy „nejlepší" stránka byla ta horší z dvoustrany.
+
+**Chyba v samotném kalibračním nástroji.** `inspect_fonts` doporučoval pro
+MagPi strategii `"keyword"`, i když správná je `"position"`. Filtr „vypiš,
+co se u okraje opakuje" totiž čísla stránek spolehlivě schová: název
+časopisu je na každé stránce **týž řetězec**, kdežto číslo stránky je na
+každé stránce **jiné**. Musí se počítat každé jinak. K tomu dvě chyby
+v jmenovateli: podíly se počítaly proti celému číslu, i když se prohlédlo
+jen prvních N stránek, a čísla se sčítala po výskytech místo po stránkách
+(číslo bývá vysázené nahoře i dole, takže součet přesáhl počet stránek —
+u Živy vyšlo „140 z 84"). Po opravě doporučí nástroj `"position"` pro oba
+časopisy, což je pro oba to, co skutečně funguje.
+
+**Co zůstává nedořešené:** rozdělení titulku a autora podle barvy prvního
+spanu je ryze živovská heuristika. U MagPi místo autora vychází název
+rubriky („Tutorials") a na stránce s obsahem se pár čísel v jiném formátu
+mylně vezme za začátek nové položky, takže vzniknou duplicitní záznamy
+(reálně asi čtvrtina). Na použitelnost korpusu to nemá vliv — text článků
+i stránkové rozsahy sedí — ale metadata autorů by pro MagPi chtěla vlastní
+pravidlo.
+
+Regrese na Živě prošla po každé z těchhle změn: `blocks`, `toc`, `page_map`,
+`articles` i `chunks` zůstávají bajtově shodné.

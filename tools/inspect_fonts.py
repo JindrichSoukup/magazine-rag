@@ -24,6 +24,7 @@ Použití:
     python -m tools.inspect_fonts cesta/k/cislu.pdf --samples 5 --pages 20
 """
 import argparse
+import re
 from collections import Counter, defaultdict
 
 import fitz
@@ -35,15 +36,20 @@ from magrag.typography import font_family, is_bold_font
 # jen jednotlivé přeteklé spany, ze kterých se pravidlo stejně neodvozuje.
 TOP_COMBINATIONS = 15
 
+# Holé číslo stránky u okraje - arabské i římské. Podle toho, jak často
+# takové číslo v čísle je, se vybírá strategie detekce patičky.
+PAGE_NUMBER_RE = re.compile(r"\d{1,4}|[IVXLCDMivxlcdm]{1,10}")
+
 
 def collect(doc, max_pages=None):
     """Projdi dokument a posbírej statistiku sazby po spanech."""
     by_style = Counter()          # (rodina, velikost, tučnost) -> počet znaků
     samples = defaultdict(list)   # totéž -> ukázky textu
-    footer_candidates = Counter()  # text u okraje stránky -> na kolika stránkách
+    footer_candidates = Counter()  # text u okraje stránky -> kolikrát se objevil
+    numeric_pages = set()          # stránky, kde u okraje stojí holé číslo
 
-    pages = doc.page_count if max_pages is None else min(max_pages, doc.page_count)
-    for page_index in range(pages):
+    scanned = doc.page_count if max_pages is None else min(max_pages, doc.page_count)
+    for page_index in range(scanned):
         page = doc[page_index]
         page_height = page.rect.height
         for block in page.get_text("dict")["blocks"]:
@@ -65,7 +71,12 @@ def collect(doc, max_pages=None):
                                  or y1 <= page_height * 0.10)
                     if near_edge and span["size"] < 12 and len(text.split()) <= 6:
                         footer_candidates[text] += 1
-    return by_style, samples, footer_candidates
+                        if PAGE_NUMBER_RE.fullmatch(text):
+                            # počítají se STRÁNKY, ne výskyty: číslo stránky
+                            # bývá vysázené dvakrát (nahoře i dole) a součet
+                            # výskytů by pak přesáhl počet stránek
+                            numeric_pages.add(page_index)
+    return by_style, samples, footer_candidates, numeric_pages, scanned
 
 
 def print_histogram(by_style, samples, n_samples):
@@ -127,21 +138,45 @@ def suggest_rules(by_style):
           "velikost odvodit\nz dokumentu za běhu (viz profiles/adaptive.py).\n")
 
 
-def print_footers(footer_candidates, doc_pages):
+def print_footers(footer_candidates, numeric_pages, doc_pages):
+    """Vypiš, co se u okraje stránky opakuje - a zvlášť, kolikrát tam stojí
+    holé číslo.
+
+    Ty dvě věci se musí počítat každá jinak, jinak se ta důležitější ztratí:
+    název časopisu v patičce je na každé stránce **týž řetězec**, kdežto
+    číslo stránky je na každé stránce **jiné**. Filtr na "opakuje se" tedy
+    čísla stránek spolehlivě schová, i když jsou to přesně ony, podle
+    kterých se rozhoduje mezi oběma strategiemi detekce.
+    """
     print("=== Kandidáti na běžící patičku ===\n")
+
+    numeric = len(numeric_pages)
     repeated = [(t, n) for t, n in footer_candidates.most_common(20)
-                if n >= max(3, doc_pages * 0.1)]
-    if not repeated:
-        print("Nic, co by se u okraje stránky opakovalo. Časopis buď patičku\n"
-              "nemá, nebo je v ní jen holé číslo stránky (pak v profilu\n"
-              'nastavte footer_detection="position").\n')
-        return
-    for text, n in repeated:
-        print(f"  {n:>4}x  {text[:70]}")
-    print('\nJe-li v patičce název časopisu nebo jeho web, nastavte '
-          'footer_detection="keyword"\na footer_keywords/footer_pattern podle '
-          'výpisu výše. Je-li tam jen číslo,\nnastavte '
-          'footer_detection="position".\n')
+                if n >= max(3, doc_pages * 0.1)
+                and not PAGE_NUMBER_RE.fullmatch(t.strip())]
+
+    if repeated:
+        print("Opakující se text u okraje stránky:")
+        for text, n in repeated:
+            print(f"  {n:>4}x  {text[:70]}")
+        print()
+    print(f"Stránek s holým číslem u okraje: {numeric} z {doc_pages}\n")
+
+    if numeric >= doc_pages * 0.4:
+        print('Doporučení: footer_detection="position" - číslo stránky je\n'
+              "u okraje na většině stránek a dá se najít podle polohy.")
+        if repeated:
+            print('(Strategie "keyword" by taky šla, viz opakující se text '
+                  "výše, ale\npoloha je jednodušší a nezávisí na jazyce.)")
+    elif repeated:
+        print('Doporučení: footer_detection="keyword" - holé číslo se u '
+              "okraje\nnenašlo dost často, ale opakuje se tam text výše. "
+              "Podle něj vyplňte\nfooter_keywords a footer_pattern.")
+    else:
+        print("U okraje stránky se neopakuje nic a holá čísla tam nejsou.\n"
+              'Časopis možná běžící patičku nemá - pak footer_detection="none"\n'
+              "a počítejte s tím, že se články nenamapují na tištěné stránky.")
+    print()
 
 
 def main():
@@ -155,12 +190,16 @@ def main():
     args = ap.parse_args()
 
     doc = fitz.open(args.pdf)
-    by_style, samples, footers = collect(doc, args.pages)
+    by_style, samples, footers, numeric_pages, scanned = collect(doc, args.pages)
 
-    print(f"\n{args.pdf}: {doc.page_count} stránek\n")
+    partial = f" (prohlédnuto prvních {scanned})" if scanned < doc.page_count else ""
+    print(f"\n{args.pdf}: {doc.page_count} stránek{partial}\n")
     print_histogram(by_style, samples, args.samples)
     suggest_rules(by_style)
-    print_footers(footers, doc.page_count)
+    # Jmenovatelem musí být počet PROHLÉDNUTÝCH stránek, ne celého čísla -
+    # jinak se podíly počítají proti stránkám, do kterých se skript vůbec
+    # nepodíval, a doporučení vyjde naopak.
+    print_footers(footers, numeric_pages, scanned)
 
 
 if __name__ == "__main__":
