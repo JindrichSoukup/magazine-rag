@@ -19,8 +19,8 @@ import argparse
 
 import chromadb
 
-from magrag.console import setup_console
-from magrag.embed import embed
+from magazine_rag.console import setup_console
+from magazine_rag.embed import embed
 
 
 def run_query(coll, model_name, query_text, top_k, year=None, chunk_type=None):

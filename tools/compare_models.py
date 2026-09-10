@@ -22,8 +22,8 @@ from pathlib import Path
 
 import numpy as np
 
-from magrag.console import setup_console
-from magrag.embed import embed
+from magazine_rag.console import setup_console
+from magazine_rag.embed import embed
 
 # Adapt these to your own archive and your knowledge of its content.
 # "expect_title_substring" is a substring that should appear in the title

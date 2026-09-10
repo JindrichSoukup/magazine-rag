@@ -33,7 +33,7 @@ Each chunk gets:
     misleading on the later chunks
 
 Usage:
-    python -m magrag.build_chunks --input output/corpus.json \\
+    python -m magazine_rag.build_chunks --input output/corpus.json \\
         --output output/chunks.jsonl
 """
 import argparse
@@ -41,8 +41,8 @@ import json
 import re
 from pathlib import Path
 
-from magrag import profiles
-from magrag.console import setup_console
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
 
 TARGET_CHARS = 1200
 # On the 512-token limit of standard BERT/XLM-R models (the whole E5

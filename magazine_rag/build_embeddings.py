@@ -36,7 +36,7 @@ normally change the input between two sittings of "compute the
 embeddings".
 
 Usage:
-    python -m magrag.build_embeddings --input output/chunks.jsonl \\
+    python -m magazine_rag.build_embeddings --input output/chunks.jsonl \\
         --output-dir output --model intfloat/multilingual-e5-base
 
     # after an interruption, just run exactly the same command again
@@ -48,9 +48,9 @@ from pathlib import Path
 
 import numpy as np
 
-from magrag import profiles
-from magrag.console import setup_console
-from magrag.embed import embed, embedding_dim, DEFAULT_MODEL, DEFAULT_BATCH_SIZE
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
+from magazine_rag.embed import embed, embedding_dim, DEFAULT_MODEL, DEFAULT_BATCH_SIZE
 
 DEFAULT_CHECKPOINT_EVERY = 500
 

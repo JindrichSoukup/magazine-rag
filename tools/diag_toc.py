@@ -13,9 +13,9 @@ import argparse
 
 import fitz
 
-from magrag import profiles
-from magrag.console import setup_console
-from magrag.create_toc import find_toc_pages, is_page_span
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
+from magazine_rag.create_toc import find_toc_pages, is_page_span
 
 
 def main():

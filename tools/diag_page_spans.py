@@ -12,7 +12,7 @@ import argparse
 
 import fitz
 
-from magrag.console import setup_console
+from magazine_rag.console import setup_console
 
 
 def main():

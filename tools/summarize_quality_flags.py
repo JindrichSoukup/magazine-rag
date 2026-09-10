@@ -11,7 +11,7 @@ import argparse
 import json
 from collections import Counter, defaultdict
 
-from magrag.console import setup_console
+from magazine_rag.console import setup_console
 
 
 def main():

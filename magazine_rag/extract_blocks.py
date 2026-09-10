@@ -18,10 +18,10 @@ How it works:
   4. Every resulting block gets a type (title/heading/other/body/caption/
      annotation). This is the only step tied to a specific typesetting
      and it is entirely factored out into the source profile - see
-     `magrag/profiles/` and `magrag/typography.py`.
+     `magazine_rag/profiles/` and `magazine_rag/typography.py`.
 
 Usage:
-    python -m magrag.extract_blocks --profile ziva input.pdf blocks.json
+    python -m magazine_rag.extract_blocks --profile ziva input.pdf blocks.json
 """
 import argparse
 import json
@@ -31,9 +31,9 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
-from magrag import profiles
-from magrag.console import setup_console
-from magrag.typography import (
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
+from magazine_rag.typography import (
     DocumentStats,
     classify_block,
     looks_like_caption_lead,

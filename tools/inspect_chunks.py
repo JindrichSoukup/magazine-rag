@@ -8,7 +8,7 @@ import statistics
 import sys
 from collections import Counter
 
-from magrag.console import setup_console
+from magazine_rag.console import setup_console
 
 
 def load(path):

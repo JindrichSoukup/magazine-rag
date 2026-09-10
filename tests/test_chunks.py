@@ -10,15 +10,15 @@ rules being tested are Czech ones, so the fixtures have to be Czech.
 """
 import pytest
 
-from magrag.build_chunks import (
+from magazine_rag.build_chunks import (
     build_chunks_for_article,
     build_embedding_text,
     chunk_paragraphs,
     filter_cover_pages,
     split_oversized_paragraph,
 )
-from magrag.extract_blocks import smart_join
-from magrag.profiles import get
+from magazine_rag.extract_blocks import smart_join
+from magazine_rag.profiles import get
 
 ZIVA = get("ziva")
 MAGPI = get("magpi")

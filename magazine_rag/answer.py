@@ -21,7 +21,7 @@ politeness in the instruction: without grounding in citable text, RAG is
 just an expensive way to have a language model confirm your own guess.
 
 Usage:
-    python -m magrag.answer --db-dir ./chroma_db --collection ziva \\
+    python -m magazine_rag.answer --db-dir ./chroma_db --collection ziva \\
         --model intfloat/multilingual-e5-base \\
         --chunks output/chunks.jsonl --corpus output/corpus.json \\
         --query "How is giant hogweed spreading here?"
@@ -38,8 +38,8 @@ from pathlib import Path
 
 import chromadb
 
-from magrag import profiles
-from magrag.assemble_context import (
+from magazine_rag import profiles
+from magazine_rag.assemble_context import (
     DEFAULT_PROMOTE_THRESHOLD,
     DEFAULT_TOP_N,
     DEFAULT_WINDOW,
@@ -50,8 +50,8 @@ from magrag.assemble_context import (
     load_jsonl,
     run_search,
 )
-from magrag.console import setup_console
-from magrag.embed import embed
+from magazine_rag.console import setup_console
+from magazine_rag.embed import embed
 
 # Claude Opus 5 - latest generation, 1M context. Answers over a magazine
 # archive tend to be a longer piece of continuous prose rather than a

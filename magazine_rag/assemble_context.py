@@ -18,7 +18,7 @@ Rather than returning the individual, short chunks separately:
      it says.
 
 Usable as a library (see answer.py, which calls it) and on its own:
-    python -m magrag.assemble_context --db-dir ./chroma_db --collection ziva \\
+    python -m magazine_rag.assemble_context --db-dir ./chroma_db --collection ziva \\
         --model intfloat/multilingual-e5-base \\
         --chunks output/chunks.jsonl \\
         --corpus output/corpus.json \\
@@ -31,9 +31,9 @@ from pathlib import Path
 
 import chromadb
 
-from magrag import profiles
-from magrag.console import setup_console
-from magrag.embed import embed
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
+from magazine_rag.embed import embed
 
 try:
     import tiktoken

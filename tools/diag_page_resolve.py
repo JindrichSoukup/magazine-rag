@@ -11,8 +11,8 @@ Usage:
 import json
 import sys
 
-from magrag.build_page_map import int_to_label, label_to_int
-from magrag.console import setup_console
+from magazine_rag.build_page_map import int_to_label, label_to_int
+from magazine_rag.console import setup_console
 
 
 def main():

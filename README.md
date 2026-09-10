@@ -1,4 +1,4 @@
-# magrag — a magazine's PDF archive → corpus → RAG
+# magazine-rag — a magazine's PDF archive → corpus → RAG
 
 A pipeline that turns a magazine's back-catalogue of PDFs into a
 structured corpus of articles with metadata and citable page numbers,
@@ -104,7 +104,7 @@ typesetting looks like. Everything after it works with the structure
 ## Quick start
 
 ```bash
-git clone <url> && cd magrag
+git clone <url> && cd magazine-rag
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]"          # PDF extraction only
 pip install -r requirements.txt  # the whole pipeline, versions pinned
@@ -113,7 +113,7 @@ pip install -r requirements.txt  # the whole pipeline, versions pinned
 Put the PDFs in one directory and run the whole archive at once:
 
 ```bash
-python -m magrag.run_all --profile ziva --input ./pdf --output ./output
+python -m magazine_rag.run_all --profile ziva --input ./pdf --output ./output
 ```
 
 That produces `output/<year>-<issue>/{blocks,toc,page_map,articles}.json`
@@ -123,19 +123,19 @@ for each issue, useful when debugging, plus a combined
 The rest of the way to answers:
 
 ```bash
-python -m magrag.build_embeddings --input output/chunks.jsonl \
+python -m magazine_rag.build_embeddings --input output/chunks.jsonl \
     --output-dir output --model intfloat/multilingual-e5-base
 
 python -m tools.check_embeddings --chunks output/chunks.jsonl \
     --vectors output/ziva_embeddings__intfloat__multilingual-e5-base.npy \
     --ids     output/ziva_embeddings__intfloat__multilingual-e5-base_ids.json
 
-python -m magrag.build_chroma --chunks output/chunks.jsonl \
+python -m magazine_rag.build_chroma --chunks output/chunks.jsonl \
     --vectors output/ziva_embeddings__intfloat__multilingual-e5-base.npy \
     --ids     output/ziva_embeddings__intfloat__multilingual-e5-base_ids.json \
     --db-dir ./chroma_db --collection ziva --overwrite
 
-python -m magrag.answer --db-dir ./chroma_db --collection ziva \
+python -m magazine_rag.answer --db-dir ./chroma_db --collection ziva \
     --model intfloat/multilingual-e5-base \
     --chunks output/chunks.jsonl --corpus output/corpus.json
 ```
@@ -227,8 +227,8 @@ running footer. On the sample issue of Živa it produces exactly what was
 originally derived by hand (`MeliorCE` at 9pt as body text, `živa 6/2014`
 and `ziva.avcr.cz` as the footer).
 
-Then copy `magrag/profiles/magpi.py`, edit it, and register it in
-`magrag/profiles/__init__.py`. When hand calibration does not pay off,
+Then copy `magazine_rag/profiles/magpi.py`, edit it, and register it in
+`magazine_rag/profiles/__init__.py`. When hand calibration does not pay off,
 because the magazine redesigned several times over the archive, leave
 `adaptive=True`.
 
@@ -247,7 +247,7 @@ because the magazine redesigned several times over the archive, leave
 
   ```bash
   pytest -q                                       # 105 tests
-  MAGRAG_GOLDEN_PDF=path/to/issue.pdf pytest -q   # including the golden test
+  MAGAZINE_RAG_GOLDEN_PDF=path/to/issue.pdf pytest -q   # including the golden test
   ```
 
 - **`quality_flags`** on every article admit where the pipeline had to
@@ -268,7 +268,7 @@ belong there for rights reasons.
 ## Layout
 
 ```
-magrag/            the pipeline (one module per stage)
+magazine_rag/            the pipeline (one module per stage)
   profiles/        source profiles + system prompts
   typography.py    block classification, hand-written and adaptive
   console.py       UTF-8 on stdout (or it dies on the first message)

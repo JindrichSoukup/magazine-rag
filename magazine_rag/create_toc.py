@@ -13,7 +13,7 @@ separate TOC records sharing a printed_page - assign_articles.py then
 tells them apart by their own headings in the text (see
 find_heading_positions there).
 
-    python -m magrag.create_toc --profile ziva input.pdf toc.json
+    python -m magazine_rag.create_toc --profile ziva input.pdf toc.json
 """
 import argparse
 import json
@@ -23,9 +23,9 @@ from pathlib import Path
 
 import fitz
 
-from magrag import profiles
-from magrag.console import setup_console
-from magrag.typography import font_style_key
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
+from magazine_rag.typography import font_style_key
 
 # How many leading pages are searched when the profile does not say where
 # the contents are (empty toc_page_indices) - see find_toc_pages().

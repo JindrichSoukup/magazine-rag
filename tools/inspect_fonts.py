@@ -31,8 +31,8 @@ from collections import Counter, defaultdict
 
 import fitz
 
-from magrag.console import setup_console
-from magrag.typography import font_family, is_bold_font
+from magazine_rag.console import setup_console
+from magazine_rag.typography import font_family, is_bold_font
 
 # How many of the most voluminous combinations are printed. Beyond this
 # there are only stray overflow spans, which no rule would be derived

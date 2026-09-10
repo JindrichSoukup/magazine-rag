@@ -7,7 +7,7 @@ exactly the cases that turned out to be real bugs on a real archive.
 """
 import pytest
 
-from magrag.build_page_map import (
+from magazine_rag.build_page_map import (
     build_page_map,
     extend_runs_into_gaps,
     extract_label,
@@ -18,7 +18,7 @@ from magrag.build_page_map import (
     normalize_label,
     roman_to_int,
 )
-from magrag.profiles import get
+from magazine_rag.profiles import get
 
 ZIVA = get("ziva")
 MAGPI = get("magpi")

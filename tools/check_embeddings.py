@@ -27,7 +27,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from magrag.console import setup_console
+from magazine_rag.console import setup_console
 
 
 def load_chunks(path):

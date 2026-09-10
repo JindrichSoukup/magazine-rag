@@ -17,9 +17,9 @@ Usage:
 import argparse
 import json
 
-from magrag import profiles
-from magrag.console import setup_console
-from magrag.assign_articles import (
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
+from magazine_rag.assign_articles import (
     cluster_columns,
     find_split_y,
     is_junk,

@@ -7,8 +7,8 @@ tested is the rule, not the content.
 """
 import pytest
 
-from magrag.profiles import get
-from magrag.typography import (
+from magazine_rag.profiles import get
+from magazine_rag.typography import (
     DocumentStats,
     classify_block,
     font_family,
@@ -183,5 +183,5 @@ def test_similar_family_names_stay_apart():
 
 
 def test_font_style_key_buckets_to_half_points():
-    from magrag.typography import font_style_key
+    from magazine_rag.typography import font_style_key
     assert font_style_key("Roboto-Bold", 8.51) == font_style_key("Roboto", 8.49)

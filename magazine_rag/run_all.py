@@ -15,20 +15,20 @@ How the PDFs are named comes from `filename_pattern` in the source
 profile (`ziva-YYYY-N.pdf` for Živa, `MagPi<N>.pdf` for The MagPi).
 
 Usage:
-    python -m magrag.run_all --profile ziva --input ./pdf --output ./output
-    python -m magrag.run_all --profile magpi --input ./pdf --output ./output
+    python -m magazine_rag.run_all --profile ziva --input ./pdf --output ./output
+    python -m magazine_rag.run_all --profile magpi --input ./pdf --output ./output
 """
 import argparse
 import json
 from pathlib import Path
 
-from magrag import profiles
-from magrag.assign_articles import assemble_articles
-from magrag.build_chunks import build_chunks_for_article
-from magrag.build_page_map import build_page_map
-from magrag.console import setup_console
-from magrag.create_toc import build_toc
-from magrag.extract_blocks import extract_pdf
+from magazine_rag import profiles
+from magazine_rag.assign_articles import assemble_articles
+from magazine_rag.build_chunks import build_chunks_for_article
+from magazine_rag.build_page_map import build_page_map
+from magazine_rag.console import setup_console
+from magazine_rag.create_toc import build_toc
+from magazine_rag.extract_blocks import extract_pdf
 
 
 def find_issues(input_dir: Path, profile):

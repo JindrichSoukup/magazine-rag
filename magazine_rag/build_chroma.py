@@ -20,7 +20,7 @@ CARE when running this repeatedly over the same --db-dir/--collection:
     the collection is dropped and rebuilt from scratch.
 
 Usage:
-    python -m magrag.build_chroma \\
+    python -m magazine_rag.build_chroma \\
         --chunks output/chunks.jsonl \\
         --vectors output/ziva_embeddings__intfloat__multilingual-e5-base.npy \\
         --ids output/ziva_embeddings__intfloat__multilingual-e5-base_ids.json \\
@@ -33,7 +33,7 @@ from pathlib import Path
 import chromadb
 import numpy as np
 
-from magrag.console import setup_console
+from magazine_rag.console import setup_console
 
 BATCH_SIZE = 4000  # Chroma caps the size of a single add()/upsert() call
 

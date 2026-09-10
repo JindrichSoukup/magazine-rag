@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "magrag"
+name = "magazine-rag"
 version = "0.2.0"
 description = "A magazine PDF archive -> structured corpus -> RAG, with swappable source profiles"
 readme = "README.md"
@@ -22,10 +22,10 @@ answer = ["anthropic>=1.0"]
 dev = ["pytest>=7.4"]
 
 [tool.setuptools.packages.find]
-include = ["magrag*"]
+include = ["magazine_rag*"]
 
 [tool.setuptools.package-data]
-"magrag.profiles" = ["prompts/*.txt"]
+"magazine_rag.profiles" = ["prompts/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

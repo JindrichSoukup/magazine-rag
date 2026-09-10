@@ -27,18 +27,18 @@ from pathlib import Path
 
 import pytest
 
-from magrag.assign_articles import assemble_articles
-from magrag.build_page_map import build_page_map
-from magrag.create_toc import build_toc
-from magrag.extract_blocks import extract_pdf
-from magrag.profiles import get
+from magazine_rag.assign_articles import assemble_articles
+from magazine_rag.build_page_map import build_page_map
+from magazine_rag.create_toc import build_toc
+from magazine_rag.extract_blocks import extract_pdf
+from magazine_rag.profiles import get
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "golden.json"
 
 # Where the source PDF is looked for. The environment variable wins, so
 # the test can also be run over an issue other than whichever one the
 # author happens to have in data/.
-ENV_VAR = "MAGRAG_GOLDEN_PDF"
+ENV_VAR = "MAGAZINE_RAG_GOLDEN_PDF"
 DEFAULT_PDF = Path("data") / "ziva-2014-6.pdf"
 
 
@@ -142,7 +142,7 @@ def _update(pdf_path: str, profile_key: str):
 
 
 if __name__ == "__main__":
-    from magrag.console import setup_console
+    from magazine_rag.console import setup_console
 
     setup_console()
     if len(sys.argv) >= 3 and sys.argv[1] == "--update":

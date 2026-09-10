@@ -72,10 +72,10 @@ import json
 import re
 from pathlib import Path
 
-from magrag import profiles
-from magrag.console import setup_console
-from magrag.build_page_map import normalize_label
-from magrag.extract_blocks import looks_like_word_break, HYPHEN_BREAK_RE
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
+from magazine_rag.build_page_map import normalize_label
+from magazine_rag.extract_blocks import looks_like_word_break, HYPHEN_BREAK_RE
 
 COLUMN_GAP = 40  # pt; an x0 gap bigger than this starts a new column cluster
 BODY_TYPES = {"title", "heading", "other", "body"}

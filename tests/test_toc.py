@@ -1,5 +1,5 @@
 """Extracting an issue's contents from the contents page."""
-from magrag.create_toc import (
+from magazine_rag.create_toc import (
     TOC_MIN_ENTRIES,
     clean,
     find_toc_pages,
@@ -58,7 +58,7 @@ class FakeDoc:
 
 
 def _find(scores, monkeypatch):
-    import magrag.create_toc as m
+    import magazine_rag.create_toc as m
     monkeypatch.setattr(m, "count_toc_entries", lambda page, profile: page)
     return find_toc_pages(FakeDoc(scores), profile=None)
 
@@ -103,7 +103,7 @@ def test_two_equally_valid_number_styles_are_both_kept():
     """Živa uses two sizes of page number in its contents (9 and 10pt)
     and both are real. Taking only the most frequent one loses half the
     entries - which is exactly what happened during development."""
-    from magrag.create_toc import detect_entry_styles
+    from magazine_rag.create_toc import detect_entry_styles
     spans = (_entries("MeliorCE-Bold", 9.0, "MeliorCE", 9.5, 19)
              + _entries("MeliorCE-Bold", 10.0, "MeliorCE", 10.0, 15, start=200))
     numbers, texts = detect_entry_styles(spans, profile=None)
@@ -116,7 +116,7 @@ def test_decorative_callout_numbers_are_rejected():
     white number with a short caption. They look like an entry, but they
     lead into a different kind of text and there are far fewer of
     them."""
-    from magrag.create_toc import detect_entry_styles
+    from magazine_rag.create_toc import detect_entry_styles
     spans = (_entries("RobotoSerif-20ptRegular", 8.5,
                       "RobotoSerif-20ptRegular", 8.5, 32)
              + _entries("Roboto-Bold", 12.0, "Roboto-Black", 12.0, 3, start=90))
@@ -129,7 +129,7 @@ def test_number_and_title_may_use_different_fonts():
     """In MagPi 150 the number is Rajdhani and the title RobotoSlab, so
     the text style is sought separately rather than as "the same family
     as the number"."""
-    from magrag.create_toc import detect_entry_styles
+    from magazine_rag.create_toc import detect_entry_styles
     spans = _entries("Rajdhani-Bold", 14.0, "RobotoSlab-Light", 11.0, 22)
     numbers, texts = detect_entry_styles(spans, profile=None)
     assert numbers == {("Rajdhani", 14.0)}
@@ -137,7 +137,7 @@ def test_number_and_title_may_use_different_fonts():
 
 
 def test_page_without_any_numbers_yields_no_styles():
-    from magrag.create_toc import detect_entry_styles
+    from magazine_rag.create_toc import detect_entry_styles
     spans = [_span("just text", "Whatever", 10.0)]
     assert detect_entry_styles(spans, profile=None) == (None, None)
 

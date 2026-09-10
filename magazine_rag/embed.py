@@ -6,7 +6,7 @@ knows nor cares whether a local sentence-transformers model is inside, or
 later an API.
 
 Usage:
-    from magrag.embed import embed
+    from magazine_rag.embed import embed
     vectors = embed(["some text", "more text"],
                     model_name="intfloat/multilingual-e5-base")
 """

@@ -14,9 +14,9 @@ Usage (needs the files run_all.py produced for one specific issue):
 import json
 import sys
 
-from magrag import profiles
-from magrag.console import setup_console
-from magrag.assign_articles import (
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
+from magazine_rag.assign_articles import (
     cluster_columns,
     find_heading_positions,
     find_split_y,

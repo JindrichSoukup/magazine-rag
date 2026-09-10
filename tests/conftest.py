@@ -6,6 +6,6 @@ default) it dies on them before anything can be verified. The test would
 then fail on the encoding of a message rather than on what it actually
 tests.
 """
-from magrag.console import setup_console
+from magazine_rag.console import setup_console
 
 setup_console()

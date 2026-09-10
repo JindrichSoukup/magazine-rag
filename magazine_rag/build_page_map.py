@@ -15,7 +15,7 @@ How: almost every page carries a running header or footer that looks
   and contains exactly one "loose" token that is either all digits or all
   Roman numerals. That is the one we take. What such a footer looks like
   for a given magazine (font, size, keyword, tokens to skip) comes from
-  the source profile - see magrag/profiles/.
+  the source profile - see magazine_rag/profiles/.
 
 Two findings from running this over a real archive:
 
@@ -39,8 +39,8 @@ import json
 import re
 from pathlib import Path
 
-from magrag import profiles
-from magrag.console import setup_console
+from magazine_rag import profiles
+from magazine_rag.console import setup_console
 
 # The upper length bound is not cosmetic: without it any long enough run
 # of the letters I/V/X/L/C/D/M passes as a "Roman numeral" - and under
