@@ -29,6 +29,8 @@ from pathlib import Path
 import chromadb
 import numpy as np
 
+from magrag.console import setup_console
+
 BATCH_SIZE = 4000  # Chroma má interní limit na velikost jednoho add()/upsert() volání
 
 
@@ -56,6 +58,7 @@ def sanitize_metadata(chunk: dict) -> dict:
 
 
 def main():
+    setup_console()
     ap = argparse.ArgumentParser()
     ap.add_argument("--chunks", required=True)
     ap.add_argument("--vectors", required=True)

@@ -1,0 +1,31 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # Schválně se neinstaluje requirements.txt: testy pokrývají
+      # extrakci z PDF a klasifikaci, k čemuž stačí PyMuPDF. Stahovat
+      # kvůli nim dva giga torche by prodloužilo běh na minuty bez
+      # jediného testu navíc.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # Zlatý test (tests/test_pipeline_golden.py) se tady sám přeskočí -
+      # potřebuje zdrojové PDF, které do repozitáře nepatří kvůli právům.
+      # Pouští se lokálně, viz README.
+      - name: Test
+        run: pytest -q

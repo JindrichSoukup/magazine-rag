@@ -48,6 +48,16 @@ PROFILE = SourceProfile(
 
     filename_pattern=r"(\d{4})-(\d+)\.pdf$",
 
+    # Co stojí v patičce neznámého časopisu, nikdo předem neví - rozhodovat
+    # tedy musí poloha na stránce, ne obsah. Bez toho by se nenašlo jediné
+    # tištěné číslo stránky, obsah čísla by se neměl na co namapovat
+    # a pipeline by tiše vyrobila nula článků.
+    footer_detection="position",
+    footer_max_size=12.0,
+    footer_zone=0.90,
+    header_zone=0.08,
+    footer_max_tokens=5,
+
     adaptive=True,
     relative_rules=RELATIVE_RULES,
     # Rodiny se u adaptivního profilu neurčují jménem, ale tím, jestli jde

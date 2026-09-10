@@ -9,6 +9,8 @@ import statistics
 import sys
 from collections import Counter
 
+from magrag.console import setup_console
+
 
 def load(path):
     with open(path, encoding="utf-8") as f:
@@ -27,6 +29,7 @@ def length_histogram(lengths, bucket=200, max_bucket=3000):
 
 
 def main():
+    setup_console()
     path = sys.argv[1] if len(sys.argv) > 1 else "ziva_embedding_chunks.jsonl"
     chunks = load(path)
     print(f"Načteno {len(chunks)} chunků z {path}\n")

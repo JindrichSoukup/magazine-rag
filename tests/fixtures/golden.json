@@ -1,0 +1,17 @@
+{
+  "profile": "ziva",
+  "pdf_name": "ziva-2014-6.pdf",
+  "counts": {
+    "blocks": 1074,
+    "toc_entries": 37,
+    "resolved_labels": 84,
+    "articles": 37,
+    "article_chunks": 665
+  },
+  "sha256": {
+    "blocks": "72f99c6714eadcac03611d8b0e6ee4dd50ce82cabc868c2f536a7178b5337b18",
+    "toc": "0c51d8ae569ba799c0461718ac4dbb5d85960a2222c61a87614e40c086d8cfaa",
+    "page_map": "0c2b846495bd8210f7510fec7f2fac869c0d751bf6903b36daf7bd963db1b59a",
+    "articles": "5dde4d77b2d9c8f8dc267ff9fd02cdb7d5569eec1977811d69092a8ffec418a8"
+  }
+}

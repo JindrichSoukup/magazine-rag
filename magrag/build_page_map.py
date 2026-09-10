@@ -42,7 +42,12 @@ from pathlib import Path
 from magrag import profiles
 from magrag.console import setup_console
 
-ROMAN_RE = re.compile(r"^[IVXLCDM]+$", re.IGNORECASE)
+# Horní mez délky není kosmetika: bez ní projde jako "římská číslice"
+# jakýkoli dost dlouhý shluk písmen I/V/X/L/C/D/M - a u detekce patičky
+# podle polohy (viz profil magpi) se takový řetězec reálně objeví
+# (např. slovo poskládané ze samých x). Nejdelší číslo stránky, které
+# dává v časopise smysl, má kolem osmi znaků.
+ROMAN_RE = re.compile(r"^[IVXLCDM]{1,10}$", re.IGNORECASE)
 DIGIT_RE = re.compile(r"^\d{1,4}$")
 
 ROMAN_VALUES = [
@@ -53,6 +58,11 @@ ROMAN_VALUES = [
 
 
 def roman_to_int(s: str) -> int:
+    # Normalizace na velká písmena musí být TADY, ne až u volajícího:
+    # bez ní se "CXLVIiI" (sazečský šotek s malým i) nerozbije nahlas,
+    # ale tiše se z něj stane 146 místo 148 - tedy špatné číslo stránky,
+    # které se pozná až o tři fáze dál jako článek přiřazený jinam.
+    s = (s or "").strip().upper()
     i, total = 0, 0
     for value, symbol in ROMAN_VALUES:
         while s[i:i + len(symbol)] == symbol:

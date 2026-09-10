@@ -1,0 +1,27 @@
+# Verze jsou zamčené na to, na čem archiv Živy (75 čísel) reálně proběhl.
+# Bez zámku se pipeline chová jinak na každém stroji - PyMuPDF mezi
+# verzemi mění, jak dělí stránku na bloky, a to je vstup úplně všeho
+# ostatního.
+
+# --- extrakce z PDF (fáze 0-3) --------------------------------------------
+PyMuPDF==1.25.3
+
+# --- embedding (fáze 5) ---------------------------------------------------
+# torch tahá ~2 GB; na CPU stačí, GPU není potřeba. Kdo chce jen zkoumat
+# extrakci z PDF, vystačí si s PyMuPDF výše.
+sentence-transformers==5.6.0
+transformers==5.14.1
+torch==2.13.0
+numpy==1.26.4
+
+# --- vektorové úložiště a retrieval (fáze 6) ------------------------------
+chromadb==1.5.9
+
+# --- generování odpovědi (fáze 7) -----------------------------------------
+anthropic>=1.0
+
+# --- volitelné ------------------------------------------------------------
+# tiktoken: přesný počet tokenů v assemble_context/answer. Bez něj se
+# počítá odhadem podle znaků a skripty to samy hlásí.
+tiktoken
+tqdm==4.66.5

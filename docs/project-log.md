@@ -110,3 +110,90 @@ Nejsložitější a nejvíc iterovaná část pipeline.
 - Sestavení promptu pro LLM z `assemble_context.py` výstupu (systémová instrukce + kontext + otázka).
 - Případný reranking (cross-encoder) jako druhá fáze, pokud window/promote heuristika v praxi nestačí.
 - Případ ojedinělé chyby "prohozené pořadí recenzí" (2019/6) zůstává vědomě neopravený (viz known limitations).
+
+---
+
+## Fáze 7 — Generování odpovědi (`answer.py`)
+
+Poslední otevřený konec z předchozí verze. Systémová instrukce ležela
+v souboru, který nikdo nečetl, a pipeline končila u vypsaného kontextu.
+
+- Prompt má tři části a každá je jinde schválně: **systémová instrukce**
+  v profilu zdroje (pravidla citování i jazyk odpovědi patří ke korpusu,
+  ne k pipeline), **kontext** jako očíslované Zdroje s plnou citací
+  a značkou CELÝ ČLÁNEK / výřez, a **dotaz** až úplně na konci, aby
+  stabilní část promptu šla cachovat.
+- Značka CELÝ ČLÁNEK / výřez není kosmetika — systémová instrukce se na ni
+  odvolává. U výřezu smí model přiznat, že úryvek začíná uprostřed
+  myšlenky; u celého článku by taková výhrada byla falešná opatrnost.
+- `--dry-run` vypíše hotový prompt a nic neposílá do API. Ladit retrieval
+  se dá zadarmo a bez klíče.
+
+---
+
+## Fáze 8 — Refaktor na profily zdroje
+
+**Problém:** pipeline byla použitelná na jeden konkrétní časopis. Jména
+fontů, velikosti písma, tvar patičky, stránka s obsahem a název časopisu
+byly zadrátované na šesti různých místech napříč pěti skripty.
+
+**Řešení:** všechno tohle je teď **data** v jednom `SourceProfile`, ne `if`
+uprostřed parseru. Přidat časopis znamená napsat jeden profil.
+
+- **Adaptivní klasifikace** (`profiles/adaptive.py`) — odpověď na to, že
+  u nového časopisu nikdo nezná jména fontů. Referenční velikost písma se
+  odvodí z dokumentu (nejobjemnější kombinace rodina+velikost podle počtu
+  ZNAKŮ, ne podle počtu bloků — titulků je na stránce hodně kusů, ale málo
+  textu) a všechna pravidla jsou relativní k ní. Přenositelné bez kalibrace,
+  za cenu toho, že nepozná rozdíly, které nejsou typografické (řádek
+  s autorem má skoro stejnou velikost jako text).
+- **Dvě strategie detekce patičky**, protože jedna nestačí: `keyword`
+  podle obsahu (Živa má v patičce vlastní název a doménu) a `position`
+  podle polohy na stránce (MagPi má v patičce jen číslo).
+- **`tools/inspect_fonts.py`** — kalibrace nového profilu. Vypíše histogram
+  sazby s ukázkami, návrh pravidel a kandidáty na patičku. Kontrola: na
+  vzorovém čísle Živy z něj vypadne přesně to, co bylo původně odvozené
+  ručně.
+
+**Skutečný bug nalezený při psaní testů:** `label_to_int()` porovnávala
+římské číslice case-insensitive, ale `roman_to_int()` uměla jen velká
+písmena — `"CXLVIiI"` (sazečský šotek) tedy tiše vracelo 146 místo 148.
+V pipeline se to neprojevilo, protože `extract_label()` token normalizuje
+dřív, ale diagnostické nástroje volají `label_to_int()` napřímo. Normalizace
+patří dovnitř. Druhý nález: `ROMAN_RE` bez horní meze délky prohlásí za
+římskou číslici jakýkoli dost dlouhý shluk písmen I/V/X/L/C/D/M — u detekce
+patičky podle polohy se to reálně stane.
+
+**Reprodukovatelnost:**
+
+- Zamčené verze v `requirements.txt`. PyMuPDF mezi verzemi mění, jak dělí
+  stránku na bloky, a to je vstup úplně všeho ostatního.
+- **Zlatý test** porovnává SHA-256 otisk výstupu každé fáze. Fixture
+  neobsahuje obsah časopisu, jen otisky a počty — reaguje stejně citlivě
+  jako porovnání textu, ale nezveřejňuje ani písmeno. Bez PDF se přeskočí.
+- Celý refaktor je ověřený regresí: `run_all` nad vzorovým číslem dává
+  `blocks`, `toc`, `page_map`, `articles`, `corpus` i `chunks` **bajtově
+  shodné** s výstupem před refaktorem.
+
+**Oprava, která byla nejvíc vidět:** pipeline padala na `UnicodeEncodeError`
+na prvním printu na každé konzoli s kódováním cp1252 (výchozí stav na
+Windows). Fungovala jen ve Spyderu, který má stdout v UTF-8 — tedy přesně
+ten druh chyby, kterou autor nikdy nevidí a každý, kdo si projekt naklonuje,
+do ní narazí do dvou sekund.
+
+**Kolik adaptivní profil stojí přesnosti** (měřeno na vzorovém čísle Živy,
+kde adaptivní profil neví o Živě vůbec nic — ani jméno fontu, ani kde je
+obsah čísla, ani co stojí v patičce): 36 článků proti 37, všech 36 titulků
+shodných s ručním profilem, 19 z nich má bajtově shodný i celý text.
+Chybějící článek se ztratil na nenamapovaném tištěném čísle stránky, zbylé
+rozdíly jsou hranice odstavců, ne ztracený obsah. Počet článků označených
+`quality_flags` je u obou profilů stejný (3).
+
+**Bug nalezený tímhle měřením:** první verze adaptivního profilu dědila
+výchozí `footer_detection="keyword"` s prázdným seznamem klíčových slov.
+Detekce patičky pak nenašla jediné tištěné číslo stránky, obsah čísla se
+neměl na co namapovat a pipeline **tiše vyrobila nula článků** — přesně ten
+typ selhání, který se bez porovnání se známým výsledkem nepozná, protože
+nic nespadne. Ošetřeno dvakrát: adaptivní profil používá `"position"`,
+a `is_footer_block()` u strategie `"keyword"` bez klíčových slov vrací
+`False` místo toho, aby za patičku prohlásila každý malý text na stránce.

@@ -21,6 +21,8 @@ import chromadb
 
 from magrag.embed import embed
 
+from magrag.console import setup_console
+
 
 def run_query(coll, model_name, query_text, top_k, year=None, chunk_type=None):
     query_vector = embed([query_text], model_name=model_name, is_query=True,
@@ -60,6 +62,7 @@ def run_query(coll, model_name, query_text, top_k, year=None, chunk_type=None):
 
 
 def main():
+    setup_console()
     ap = argparse.ArgumentParser()
     ap.add_argument("--db-dir", required=True)
     ap.add_argument("--collection", default="ziva")

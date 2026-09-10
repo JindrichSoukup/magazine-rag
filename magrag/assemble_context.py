@@ -47,6 +47,8 @@ def count_tokens(text: str) -> int:
 
 from magrag.embed import embed
 
+from magrag.console import setup_console
+
 DEFAULT_TOP_N = 10
 DEFAULT_WINDOW = 1
 DEFAULT_PROMOTE_THRESHOLD = 3
@@ -163,6 +165,7 @@ def run_search(coll, model_name, query_text, top_n):
 
 
 def main():
+    setup_console()
     ap = argparse.ArgumentParser()
     ap.add_argument("--db-dir", required=True)
     ap.add_argument("--collection", default="ziva")

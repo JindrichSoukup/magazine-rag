@@ -15,21 +15,28 @@ pro jedno konkrétní číslo):
 import json
 import sys
 
+from magrag import profiles
+from magrag.console import setup_console
 from magrag.assign_articles import is_junk, cluster_columns, find_split_y, find_heading_positions
 
 
-def ordered_page_blocks(blocks_by_page, pg):
-    page_blocks = [b for b in blocks_by_page.get(pg, []) if not is_junk(b)]
+def ordered_page_blocks(blocks_by_page, pg, profile, page_height):
+    page_blocks = [b for b in blocks_by_page.get(pg, [])
+                   if not is_junk(b, profile, page_height)]
     return [b for col, y0, b in sorted(cluster_columns(page_blocks), key=lambda t: (t[0], t[1]))]
 
 
 def main():
-    if len(sys.argv) != 4:
-        print("použití: python diag_groups.py blocks.json toc.json page_map.json")
+    setup_console()
+    if len(sys.argv) not in (4, 5):
+        print("použití: python -m tools.diag_groups blocks.json toc.json "
+              "page_map.json [profil]")
         sys.exit(1)
 
     blocks_path, toc_path, page_map_path = sys.argv[1:4]
+    profile = profiles.get(sys.argv[4] if len(sys.argv) == 5 else "ziva")
     blocks = json.loads(open(blocks_path, encoding="utf-8").read())
+    page_height = max((b["bbox"][3] for b in blocks), default=0.0)
     toc = json.loads(open(toc_path, encoding="utf-8").read())
     page_map = json.loads(open(page_map_path, encoding="utf-8").read())
     label_to_page = page_map["label_to_page"]
@@ -80,7 +87,8 @@ def main():
 
         raw = []
         for pg in range(start_pg, end_pg + 1):
-            page_blocks = ordered_page_blocks(blocks_by_page, pg)
+            page_blocks = ordered_page_blocks(blocks_by_page, pg, profile,
+                                              page_height)
             if pg == start_pg and gi > 0:
                 split_y = find_split_y(page_blocks, first_entry)
                 if split_y is not None:

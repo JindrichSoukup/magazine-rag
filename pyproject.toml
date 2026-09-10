@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "magrag"
+version = "0.2.0"
+description = "PDF archiv časopisu -> strukturovaný korpus -> RAG, s vyměnitelnými profily zdroje"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Jindřich Soukup" }]
+
+# Runtime závislosti jsou schválně jen ty pro extrakci z PDF - kdo chce
+# zkoumat parsování, nemusí stahovat dvougigový torch. Zbytek je v extras
+# a se zamčenými verzemi v requirements.txt.
+dependencies = ["PyMuPDF>=1.25"]
+
+[project.optional-dependencies]
+embed = ["sentence-transformers>=5", "torch>=2", "numpy>=1.26", "chromadb>=1.5"]
+answer = ["anthropic>=1.0"]
+dev = ["pytest>=7.4"]
+
+[tool.setuptools.packages.find]
+include = ["magrag*"]
+
+[tool.setuptools.package-data]
+"magrag.profiles" = ["prompts/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

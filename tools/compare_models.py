@@ -24,6 +24,8 @@ import numpy as np
 
 from magrag.embed import embed
 
+from magrag.console import setup_console
+
 # Upravte podle vlastního archivu a znalosti obsahu! "expect_title_substring"
 # je podřetězec, který by se měl objevit v title článku, jehož chunk čekáte
 # mezi top-k výsledky.
@@ -76,6 +78,7 @@ def evaluate_model(model_name: str, chunks, chunk_vectors):
 
 
 def main():
+    setup_console()
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True, help="ziva_embedding_chunks.jsonl")
     ap.add_argument("--verbose", action="store_true",

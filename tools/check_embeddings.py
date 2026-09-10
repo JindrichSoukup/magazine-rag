@@ -23,6 +23,8 @@ from collections import defaultdict
 
 import numpy as np
 
+from magrag.console import setup_console
+
 
 def load_chunks(path):
     with open(path, encoding="utf-8") as f:
@@ -37,6 +39,7 @@ def describe(name, values):
 
 
 def main():
+    setup_console()
     ap = argparse.ArgumentParser()
     ap.add_argument("--chunks", required=True)
     ap.add_argument("--vectors", required=True)

@@ -1,178 +1,215 @@
-# Ziva PDF → RAG pipeline (stage 1–4)
+# magrag — archiv časopisu v PDF → korpus → RAG
 
-Pořadí kroků (dá se spustit i ručně po jednom, kvůli ladění):
+Pipeline, která z ročníků časopisu v PDF udělá strukturovaný korpus článků
+s metadaty a citovatelnými čísly stránek, zaembedduje ho a odpovídá nad ním
+na otázky s odkazy na zdroj.
+
+Vzniklo to nad archivem přírodovědného měsíčníku **Živa** (75 čísel, 2 941
+článků, ~35 000 embedding chunků) a je to napsané tak, aby se to dalo
+přenést na jiný časopis výměnou jednoho souboru — viz [Profil
+zdroje](#profil-zdroje).
+
+> **Práva.** V repozitáři není žádný obsah časopisu — ani PDF, ani z nich
+> vytažený text. Živa je autorsky chráněná (Academia / AV ČR), takže archiv
+> nejde zveřejnit; kód ano. Pro veřejné demo je připravený profil pro
+> [The MagPi](https://magpi.raspberrypi.com/issues), který vychází pod
+> licencí CC BY-NC-SA.
+
+---
+
+## Proč to není `PyPDFLoader` + `RecursiveCharacterTextSplitter`
+
+Protože to na časopisecké sazbě nefunguje. Zajímavá část tohoto projektu
+není embedding ani vektorové vyhledávání — ta je hotová za odpoledne.
+Zajímavá je cesta od „PDF" k „článek s autorem, ročníkem a číslem stránky":
+
+- Text nejde po stránkách, ale po **článcích**, a jeden článek se přes
+  stránky přelévá. Kde končí, se nedozvíte odjinud než z obsahu čísla.
+- Tištěné číslo stránky **není** číslo stránky v PDF, a rozdíl není
+  konstantní: v jednom čísle se běžně střídá arabské číslování (hlavní
+  články) → římské (příloha) → arabské znovu, pokaždé s jiným posunem.
+- Jedna fyzická stránka nese **konec jednoho článku a začátek dalšího**.
+  Řezat podle pořadí bloků nestačí — poslední sloupec často běží nezávisle
+  na zbytku stránky.
+- Zarovnaný text láme slova pomlčkou. Bez slepení zpátky se do korpusu
+  dostane `opaková-` a `ní` jako dvě různá slova.
+- Popisek obrázku uprostřed sloupce **přetne větu v půlce**, když se text
+  skládá naivně shora dolů.
+
+Každá z těch věcí je jeden konkrétní bug, který se našel až na reálných
+datech. Průběh je zapsaný v [deníku projektu](docs/project-log.md) —
+včetně toho, co se rozhodlo špatně a proč.
+
+---
+
+## Jak to funguje
 
 ```
-python extract_blocks.py ziva-2014-6.pdf ziva_blocks.json
-python create_toc.py     ziva-2014-6.pdf ziva_toc.json
-python build_page_map.py                       # čte ziva_blocks.json, píše page_map.json
-python assign_articles.py                      # čte ziva_blocks.json + ziva_toc.json + page_map.json, píše ziva_articles.json
+ PDF čísla
+    │
+    ├─► extract_blocks    bloky textu s fontem, velikostí, polohou a typem
+    │                     (title/heading/other/body/caption/annotation)
+    ├─► create_toc        obsah čísla: článek → autor → tištěná stránka
+    ├─► build_page_map    tištěná stránka → stránka PDF (úseky číslování)
+    ├─► assign_articles   bloky → články, včetně sdílených hraničních stran
+    │                     + quality_flags tam, kde si pipeline není jistá
+    ├─► build_chunks      články → chunky ~1200 znaků s metadatovou hlavičkou
+    ├─► build_embeddings  chunky → vektory (lokální model, s checkpointy)
+    ├─► build_chroma      vektory → Chroma
+    ├─► assemble_context  dotaz → zdroje s citacemi (window + promote)
+    └─► answer            zdroje + otázka → odpověď LLM s odkazy na zdroj
 ```
 
-Nebo hromadně přes celý archiv:
+Krok `extract_blocks` je jediný, který ví, jak vypadá sazba konkrétního
+časopisu. Všechno za ním pracuje už jen se strukturou
+`{page, type, font, bbox, text}` a je přenositelné beze změny.
+
+---
+
+## Rychlý start
+
+```bash
+git clone <url> && cd magrag
+python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
+pip install -e ".[dev]"          # jen extrakce z PDF
+pip install -r requirements.txt  # celá pipeline se zamčenými verzemi
+```
+
+Dejte PDF do jedné složky a pusťte celý archiv najednou:
+
+```bash
+python -m magrag.run_all --profile ziva --input ./pdf --output ./output
+```
+
+Vznikne `output/<rok>-<číslo>/{blocks,toc,page_map,articles}.json` pro každé
+číslo (užitečné při ladění), plus souhrnný `output/corpus.json` a
+`output/chunks.jsonl`.
+
+Zbytek cesty k odpovědím:
+
+```bash
+python -m magrag.build_embeddings --input output/chunks.jsonl \
+    --output-dir output --model intfloat/multilingual-e5-base
+
+python -m tools.check_embeddings --chunks output/chunks.jsonl \
+    --vectors output/ziva_embeddings__intfloat__multilingual-e5-base.npy \
+    --ids     output/ziva_embeddings__intfloat__multilingual-e5-base_ids.json
+
+python -m magrag.build_chroma --chunks output/chunks.jsonl \
+    --vectors output/ziva_embeddings__intfloat__multilingual-e5-base.npy \
+    --ids     output/ziva_embeddings__intfloat__multilingual-e5-base_ids.json \
+    --db-dir ./chroma_db --collection ziva --overwrite
+
+python -m magrag.answer --db-dir ./chroma_db --collection ziva \
+    --model intfloat/multilingual-e5-base \
+    --chunks output/chunks.jsonl --corpus output/corpus.json
+```
+
+`answer` bez `--query` běží interaktivně. S `--dry-run` vypíše hotový prompt
+a nic neposílá do API — hodí se na ladění retrievalu zadarmo.
+
+---
+
+## Profil zdroje
+
+Všechno, čím se jeden časopis liší od jiného, je v jednom `SourceProfile`
+místo roztroušené po pěti skriptech: jména fontů a velikosti písma pro
+klasifikaci bloků, tvar běžící patičky, stránka s obsahem čísla, vzor
+pojmenování souborů, jazyk metadatové hlavičky a systémová instrukce.
+
+| Profil | Sazba | Patička | Poznámka |
+|---|---|---|---|
+| `ziva` | ruční, absolutní velikosti | podle názvu časopisu | referenční, vyladěný na 75 čísel |
+| `magpi` | adaptivní | podle polohy na stránce | otevřená licence, vhodné pro demo |
+| `adaptive` | adaptivní | — | základ pro neznámý časopis |
+
+**Adaptivní klasifikace** je odpověď na to, že u nového časopisu nikdo
+nezná jména fontů. Místo absolutních hodnot si pipeline spočítá, kolik
+znaků je vysázeno kterou kombinací rodiny a velikosti písma. Nejobjemnější
+kombinace je z definice běžný text — a všechna pravidla jsou pak relativní
+k ní („titulek je 1,7× větší než text"). Vážení podle znaků, ne podle počtu
+bloků, je podstatné: titulků je na stránce hodně kusů, ale málo textu.
+
+Kolik se za přenositelnost platí, jde změřit: stejné číslo Živy zpracované
+oběma profily, kde adaptivní neví o Živě vůbec nic — ani jméno fontu, ani
+kde je obsah čísla, ani co stojí v patičce.
+
+| | ruční `ziva` | adaptivní |
+|---|---|---|
+| nalezené články | 37 | 36 |
+| shodné titulky | — | 36 z 36 |
+| bajtově shodný text článku | — | 19 z 36 |
+| články s `quality_flags` | 3 | 3 |
+
+Jeden článek chybí, protože se nepodařilo namapovat jeho tištěné číslo
+stránky. Zbylé rozdíly v textu jsou hranice odstavců, ne ztracený obsah.
+
+### Přidání nového časopisu
+
+```bash
+python -m tools.inspect_fonts cesta/k/cislu.pdf
+```
+
+Vypíše histogram sazby s ukázkami textu, hotový návrh pravidel k vložení do
+profilu a kandidáty na běžící patičku. Na vzorovém čísle Živy z něj vypadne
+přesně to, co bylo původně odvozené ručně (`MeliorCE` @ 9 b jako běžný text,
+`živa 6/2014` a `ziva.avcr.cz` jako patička).
+
+Pak zkopírujte `magrag/profiles/magpi.py`, upravte a zaregistrujte
+v `magrag/profiles/__init__.py`. Když se ruční kalibrace nevyplatí (časopis
+během archivu několikrát změnil grafiku), nechte `adaptive=True`.
+
+---
+
+## Reprodukovatelnost
+
+- **Zamčené verze** v `requirements.txt`. PyMuPDF mezi verzemi mění, jak
+  dělí stránku na bloky, a to je vstup úplně všeho ostatního.
+- **Zlatý test** (`tests/test_pipeline_golden.py`) porovnává SHA-256 otisk
+  výstupu každé fáze proti zafixované hodnotě. Fixture neobsahuje obsah
+  časopisu, jen otisky a počty — na změnu reaguje stejně citlivě jako
+  porovnání textu, ale nezveřejňuje ani písmeno. Bez zdrojového PDF se sám
+  přeskočí:
+
+  ```bash
+  pytest -q                                      # 85 testů
+  MAGRAG_GOLDEN_PDF=cesta/k/cislu.pdf pytest -q  # včetně zlatého testu
+  ```
+
+- **`quality_flags`** u každého článku přiznávají, kde se pipeline musela
+  spolehnout na fallback (`boundary_page_unverified`, `merged_fallback`, …).
+  Souhrn přes celý archiv: `python -m tools.summarize_quality_flags`.
+  Na Živě má aspoň jednu vlajku 8,8 % článků a 70 % z nich patří do jediné
+  dobře známé kategorie (administrativní zadní strana čísla).
+
+Generovaná data (`output/`, `chroma_db/`, vektory) a zdrojová PDF jsou
+v `.gitignore`. Korpus Živy má 127 MB, chunky 95 MB a vektory 120 MB — přes
+limit GitHubu na jeden soubor, a hlavně to tam nepatří kvůli právům.
+
+---
+
+## Struktura
 
 ```
-pip install pymupdf
-
-pdf/
-  ziva-2014-6.pdf
-  ziva-2015-1.pdf
-  ...
-
-python run_all.py --input ./pdf --output ./output
+magrag/            pipeline (jeden modul na fázi)
+  profiles/        profily zdroje + systémové instrukce
+  typography.py    klasifikace bloků, ruční i adaptivní
+  console.py       UTF-8 na stdout (jinak spadne na první české hlášce)
+tools/             diagnostika a kalibrace, nepatří do produkčního běhu
+tests/             85 testů; zlatý test se bez PDF přeskočí
+docs/              deník projektu a poznámky k rozhodování o RAG
 ```
 
-Výstup: `output/<rok>-<číslo>/{blocks,toc,page_map,articles}.json` pro každé
-číslo + souhrnný `output/ziva_corpus.json` se všemi články ze všech čísel
-(má `article_id` typu `"2014-6-0"`, takže je bezpečné je sloučit dohromady).
+## Dokumentace
 
-## Co je potřeba pohlídat u jiných čísel
+- [Deník projektu](docs/project-log.md) — co se stavělo, na co se přišlo
+  a proč se to rozhodlo takhle. Nejzajímavější čtení z celého repozitáře.
+- [RAG: build vs. buy](docs/rag-build-vs-buy.md) — co si z toho odnést,
+  když podobnou věc řídíte ve větší organizaci.
+- [Přehled rozhodnutí podle vrstvy](docs/rag-decision-checklist.md) — co se
+  v každé vrstvě RAG systému rozhoduje, explicitně nebo tiše defaultem.
 
-* `extract_blocks.py` – heuristika typu bloku (`title`/`heading`/`other`/
-  `body`/`caption`) je založená na fontu `MeliorCE`/`HelveticaCE` a
-  konkrétních velikostech písma (viz `classify()`). Pokud se v jiných
-  ročnících liší barva/velikost nadpisů (jak jste zmiňoval), stejná
-  velikost/tučnost by měla platit i tak – ale stojí za to zkontrolovat pár
-  čísel napříč roky (`extract_blocks.py` + rychlý pohled na `type` v JSONu).
-* `create_toc.py` – počítá s tím, že obsah čísla je vždy na 3. fyzické
-  stránce PDF (`toc_page_indices=(2,)`, 0-indexováno). Pokud by se to u
-  starších/novějších čísel lišilo, stačí tenhle parametr změnit (nebo
-  `build_toc()` zavolat pro víc indexů najednou).
-* `build_page_map.py`/`assign_articles.py` na fontu/heuristikách
-  `extract_blocks.py` nezávisí o nic víc, než že očekávají pole
-  `page`, `block_id`, `type`, `font`, `font_size`, `bbox`, `text` u
-  každého bloku – takže i kdyby `extract_blocks.py` bylo nutné pro jiný
-  layout upravit, zbytek pipeline by měl fungovat beze změny.
+## Licence
 
-## Update: zalomení pomlčkou i mezi chunky (ne jen uvnitř stránky)
-
-`extract_blocks.py`'s `smart_join()` řešil jen zalomení uvnitř jedné
-stránky. Chunky z různých sloupců (nemerguje se, protože mezi nimi je
-vizuálně jiný blok/obrázek) nebo z různých stránek napříč jedním článkem
-se ale skládaly obyčejným `"\n\n".join(...)` bez kontroly pomlčky. Na
-vzorovém čísle to způsobovalo 27 rozbitých slov typu `"opaková-"` +
-`"ní..."` místo `"opakování"`. `assign_articles.py` teď při skládání
-`full_text`/`captions_text` používá stejnou detekci (naimportovanou z
-`extract_blocks.py`), takže se to slepí bez ohledu na to, kde přesně k
-zalomení došlo.
-
-## Update: číslování stránek přes celý archiv (build_page_map.py v3)
-
-Ukázalo se na reálných číslech, že tištěné číslování stránek není jedna
-souvislá řada – v jednom PDF se běžně střídá: arabské číslo (hlavní články)
-→ římské číslo (příloha) → arabské číslo znovu (další články), a offset
-(rozdíl mezi PDF stránkou a tištěným číslem) je pro každý takový úsek jiný.
-`build_page_map.py` teď detekuje tyhle souvislé úseky sám ("runs" v
-`page_map.json`) a dopočítává chybějící popisky (třeba celostránková fotka
-bez patičky) v rámci téhož úseku. Opravil jsem taky bug, kdy se jednopísmenné
-římské číslice ("I", "V", "X", "C"...) mylně zahazovaly jako "nejednoznačné".
-
-## Update: build_chunks.py napojený do run_all.py
-
-`run_all.py` teď po sesbírání `ziva_corpus.json` rovnou zavolá i chunkování
-a vyrobí `output/ziva_embedding_chunks.jsonl` - nemusíte spouštět
-`build_chunks.py` zvlášť (pořád ale jde, kdyby se hodilo přegenerovat
-chunky s jinými parametry bez opakování celé extrakce z PDF). Parametry
-`--skip-first`/`--skip-last` (výchozí 2/2) jdou nastavit i na `run_all.py`.
-
-## Update: build_chunks.py (stage 5) + kde se řeší obálkové stránky
-
-Nový skript `build_chunks.py` sekundárně nasekává `full_text_paragraphs`/
-`captions_paragraphs` (viz níž) na chunky vhodné pro embedding - cílová
-velikost ~1200 znaků, s malým překryvem mezi sousedními chunky, plus
-metadata (ročník/číslo/článek/autoři) jako samostatná pole i jako hlavička
-zapečená přímo do `embedding_text` (tzv. "contextual chunking" - pomáhá to
-relevanci vyhledávání, protože osamocený chunk bez kontextu embedding
-modelu i LLM říká míň).
-
-**Konceptuální rozhodnutí, které stálo za probrání:** poslední článek
-v každém čísle dostával `pdf_page_end` až do úplně poslední PDF stránky
-(protože po něm už nic dalšího není v TOC) - a tahle poslední stránka bývá
-samostatná obálková fotka, co s článkem obsahově nesouvisí (viz "IV.
-obálka" test). Řešilo by se to na 3 místech s různými kompromisy:
-
-1. Zahodit stránky obálky už v `extract_blocks.py` (nejjednodušší, ale
-   nevratně - `blocks.json` by přestal být kompletní syrová digitalizace).
-2. Oříznout rozsah stránek v `assign_articles.py` (opravuje `articles.json`
-   jako artefakt, ale je to natvrdo zadrátované pravidlo uprostřed
-   pipeline, které s "jak digitalizuju PDF" nemá nic společného).
-3. **(zvoleno)** Nechat `blocks.json`/`articles.json` kompletní se vším
-   (žádná ztráta dat), a teprve `build_chunks.py` - tam, kde se skutečně
-   rozhoduje "co jde do RAG" - stránky obálky vyfiltruje. Aby to šlo udělat
-   přesně (ne jen hledáním textového markeru "obálka"), `assign_articles.py`
-   teď u každého článku navíc ukládá `full_text_paragraphs`/
-   `captions_paragraphs` (list `{"page": N, "text": "..."}` místo jednoho
-   stringu) a `total_pdf_pages` (celkový počet stran PDF čísla). Nic se
-   tím neztrácí - `full_text`/`captions_text` jako hotové stringy tam
-   zůstávají dál pro rychlý náhled/čtení.
-
-`build_chunks.py` pak přes `--skip-first`/`--skip-last` (výchozí 2/2)
-vynechá odstavce z první/poslední N stránek PDF při stavbě chunků.
-
-Mimochodem oprava bugu: `split_oversized_paragraph` neuměl rozsekat
-odstavec, který nemá ŽÁDNOU tečku/otazník/vykřičník (typicky výpis dat
-z tabulky/grafu) - vrátil ho tak, jak byl, i kdyby byl 4x delší než limit.
-Teď má fallback na sekání po slovech.
-
-## Update: full_text a captions_text jsou teď oddělené
-
-Ukázalo se, že mít popisky obrázků namíchané (byť označené) přímo v
-`full_text` je problém: obrázek/graf často sedí uprostřed sloupce, takže
-text před ním a za ním jsou v PDF opravdu dva samostatné bloky - a naše
-řazení podle (sloupec, y) je pak vmáčklo vedle sebe s popiskem obrázku
-mezi nimi, čímž v souvislém textu vypadalo, že je věta uprostřed přeťatá
-popiskem ("...jeho" → [popisek grafu] → "dopad významně ovlivňují...").
-
-Řešení: `full_text` teď skládáme jen z `title`/`heading`/`other`/`body`
-chunků (žádné captions/annotations). Popisky obrázků mají svoje vlastní
-pole `captions_text` (spojené za sebou, ve svém pořadí). Věta se tak sice
-pořád může rozdělit do dvou odstavců místo plynulého navázání, ale aspoň
-ji nepřetne cizí obsah uprostřed.
-
-Zároveň jsem rozšířil detekci `annotation` o legendy barevných škál na
-mapách/grafech ("pod -150 -100 až -50 0 až 50 100 až 150 nad 150", "do 3
-3–4 4–5 ... nad 12") a krátké jednotky v hranaté závorce ("[°C]", "[%]").
-
-## Update: chytání popisků sazených v běžném písmu (bez malého fontu)
-
-Delší popisky obrázků v Živě jsou často sazené STEJNÝM písmem jako tělo
-článku (MeliorCE, ne malá bezpatková caption-sazba), takže je `classify()`
-podle fontu vůbec nerozezná od běžného textu. `extract_blocks.py` teď navíc
-kontroluje, jestli `body`-blok začíná typickým odkazem na číslo obrázku
-("1 a 2 Nejnápadnějším příznakem...", "3 Schéma normálního...", "9 a 10
-..."). Zkoušel jsem to kombinovat i s kontrolou, že blok sedí v PDF hned
-vedle obrázku, ale u přechodů mezi články bývá popisek v surovém pořadí
-bloků docela daleko od "svého" obrázku (mezi nimi je titulek/autor/abstrakt
-dalšího článku) - spoléhá se tedy jen na tvar textu + minimální délku 20
-znaků (ať to nechytne krátké číslované nadpisy typu "1. Úvod"). Na
-vzorovém čísle to opravilo všech 12 dosud nezachycených popisků beze
-zjištěného falešného poplachu.
-
-## Update: rozlišení "annotation" vs "caption"
-
-`extract_blocks.py` teď umí odlišit dvě různé věci, které předtím obojí
-padaly do `type: "caption"`:
-
-* **`"caption"`** – skutečný popisek obrázku (i útržkovitý, ale pořád jde
-  o smysluplný text popisující, co je vidět).
-* **`"annotation"`** – editorská "hantýrka" nalepená přímo na obrázek/schéma:
-  panelové značky (`a`, `b`, `1`, `2`...), měřítko (`1 cm`, `0,2 mm`),
-  řady čísel na ose grafu (`35 30 25 20 15 10 5 0`). Nenese žádný obsah,
-  proto ho `assign_articles.py` do `full_text` vůbec nedává (v `chunks`
-  zůstává, pro případ potřeby).
-
-**Známé omezení:** kratší anatomické/technické útržky rozeseté kolem
-composite obrázků (např. "substantia", "nigra", "gen IT15", nebo dvoupísmenná
-zkratka do legendy jako "Mh", "Cu") se od skutečného popisku nedají čistě
-podle tvaru textu odlišit – zůstávají jako `"caption"`. Vyžadovalo by to znát
-polohu textu vůči konkrétnímu obrázku, ne jen jeho obsah.
-
-## Známá nepřesnost (a proč nevadí)
-
-Sloupcové řazení bloků v `assign_articles.py` je "best effort" – u
-víceloupcových stránek s obrázky se občas popisek obrázku (nebo pořadí
-chunků obecně) zařadí o kousek jinde, než by čtenář čekal. Od poslední
-úpravy to už ale nemůže rozbít plynulost `full_text` (ten popisky vůbec
-neobsahuje) - týká se to jen pořadí uvnitř `chunks`/`captions_text`. Pro
-RAG to nevadí: chunk je pořád smysluplný samostatný kus textu se správnými
-metadaty (článek/autor/rok/číslo/stránka), jen v aproximativním pořadí.
+Kód: MIT (viz [LICENSE](LICENSE)). Obsah zpracovávaných časopisů licence
+tohoto projektu **nepokrývá** — řídí se právy vydavatele.

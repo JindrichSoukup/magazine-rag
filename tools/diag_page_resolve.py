@@ -10,11 +10,12 @@ Použití:
 import json
 import sys
 
-sys.path.insert(0, ".")
 from magrag.build_page_map import label_to_int, int_to_label
+from magrag.console import setup_console
 
 
 def main():
+    setup_console()
     page_map_path, missing_label = sys.argv[1:3]
     page_map = json.loads(open(page_map_path, encoding="utf-8").read())
 

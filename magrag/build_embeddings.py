@@ -48,6 +48,8 @@ from pathlib import Path
 
 import numpy as np
 
+from magrag import profiles
+from magrag.console import setup_console
 from magrag.embed import embed, embedding_dim, DEFAULT_MODEL, DEFAULT_BATCH_SIZE
 
 DEFAULT_CHECKPOINT_EVERY = 500
@@ -58,11 +60,16 @@ def load_chunks(path: Path):
         return [json.loads(line) for line in f]
 
 
-def paths_for(out_dir: Path, model_name: str):
+def paths_for(out_dir: Path, model_name: str, prefix: str = "embeddings"):
     """Jedno místo, kde se skládají všechna jména souborů - ať se výsledný
-    .npy/_ids.json, dočasný .raw i _progress.json vždycky shodují."""
+    .npy/_ids.json, dočasný .raw i _progress.json vždycky shodují.
+
+    `prefix` odděluje výstupy různých časopisů ve stejné složce; jméno
+    modelu je v názvu proto, aby šlo bez mazání porovnat víc kandidátů
+    (viz tools/compare_models.py).
+    """
     slug = model_name.replace("/", "__")
-    base = out_dir / f"ziva_embeddings__{slug}"
+    base = out_dir / f"{prefix}__{slug}"
     return {
         "npy": base.with_suffix(".npy"),
         "ids": Path(f"{base}_ids.json"),
@@ -80,15 +87,19 @@ def format_eta(seconds: float) -> str:
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, help="ziva_embedding_chunks.jsonl")
+    setup_console()
+    ap = argparse.ArgumentParser(description="spočítej embeddingy pro chunky")
+    ap.add_argument("--input", required=True, help="chunks.jsonl")
     ap.add_argument("--output-dir", required=True, help="kam uložit .npy a _ids.json")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
                      help="dávka pro samotný model.encode() (výpočetní jednotka)")
     ap.add_argument("--checkpoint-every", type=int, default=DEFAULT_CHECKPOINT_EVERY,
                      help="po kolika chuncích průběžně uložit postup na disk")
+    profiles.add_profile_argument(ap)
     args = ap.parse_args()
+
+    profile = profiles.get(args.profile)
 
     chunks = load_chunks(Path(args.input))
     n = len(chunks)
@@ -99,7 +110,7 @@ def main():
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    p = paths_for(out_dir, args.model)
+    p = paths_for(out_dir, args.model, prefix=f"{profile.key}_embeddings")
 
     if p["npy"].exists():
         print(f"{p['npy']} už existuje (hotovo z dřívějška) - nic nedělám. "

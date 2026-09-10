@@ -11,8 +11,11 @@ import argparse
 import json
 from collections import Counter, defaultdict
 
+from magrag.console import setup_console
+
 
 def main():
+    setup_console()
     ap = argparse.ArgumentParser()
     ap.add_argument("corpus", help="ziva_corpus.json")
     ap.add_argument("--list", action="store_true",
