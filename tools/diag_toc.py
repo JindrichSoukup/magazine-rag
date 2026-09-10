@@ -1,13 +1,13 @@
-"""Diagnostika: vypiš syrové spany na stránce s obsahem čísla.
+"""Diagnostics: print the raw spans on the issue's contents page.
 
-Použít, když create_toc rozdělí obsah na jiný počet záznamů, než kolik
-je na stránce položek - z výpisu je vidět font, tučnost a barva každého
-spanu, tedy přesně to, podle čeho se rozhoduje, kde jedna položka končí
-a další začíná.
+Use it when create_toc splits the contents into a different number of
+records than there are items on the page. The output shows each span's
+font, weight and colour - exactly what decides where one entry ends and
+the next begins.
 
-Použití:
-    python -m tools.diag_toc cesta/k/cislu.pdf
-    python -m tools.diag_toc cesta/k/cislu.pdf --filter XXX --filter Summary
+Usage:
+    python -m tools.diag_toc path/to/issue.pdf
+    python -m tools.diag_toc path/to/issue.pdf --filter XXX --filter Summary
 """
 import argparse
 
@@ -23,11 +23,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("pdf")
     ap.add_argument("--toc-page", type=int, default=None,
-                    help="0-indexovaná stránka s obsahem; bez ní se vezme "
-                         "z profilu, případně se detekuje")
+                    help="zero-indexed page holding the contents; without it "
+                         "the profile is used, or failing that detection")
     ap.add_argument("--filter", action="append", dest="filters",
-                    help="vypiš jen spany obsahující tento řetězec; lze "
-                         "zadat vícekrát. Bez filtru se vypíše celý obsah.")
+                    help="print only spans containing this substring; may be "
+                         "given more than once. Without a filter the whole "
+                         "contents page is printed.")
     profiles.add_profile_argument(ap)
     args = ap.parse_args()
 
@@ -39,11 +40,11 @@ def main():
     else:
         pages = profile.toc_page_indices or find_toc_pages(doc, profile)
     if not pages:
-        print("Stránku s obsahem se nepodařilo najít - zkuste --toc-page.")
+        print("Could not find the contents page - try --toc-page.")
         return
 
     for page_index in pages:
-        print(f"=== PDF stránka {page_index} (0-indexováno) ===\n")
+        print(f"=== PDF page {page_index} (zero-indexed) ===\n")
         for block in doc[page_index].get_text("dict")["blocks"]:
             for line in block.get("lines", ()):
                 for span in line["spans"]:
@@ -52,8 +53,8 @@ def main():
                         continue
                     if args.filters and not any(f in txt for f in args.filters):
                         continue
-                    # hvězdička = span, který profil bere jako číslo stránky,
-                    # tedy jako začátek nové položky obsahu
+                    # An asterisk marks a span the profile treats as a page
+                    # number, i.e. as the start of a new contents entry.
                     mark = "*" if is_page_span(span, profile) else " "
                     print(f"{mark} {txt!r:<50} font={span['font']} "
                           f"size={span['size']:.1f} color={span['color']}")

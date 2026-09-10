@@ -1,32 +1,31 @@
-"""
-Interaktivní dotazování do Chroma kolekce - model i kolekce se načtou
-JEDNOU při startu, pak se ptáte opakovaně ve stejném procesu (žádné
-opakované načítání modelu při každém dotazu, jak by to dělalo spouštění
-skriptu pro každý dotaz zvlášť).
+"""Interactive querying of a Chroma collection.
 
-Použití:
-    python query_chroma.py --db-dir ./chroma_db --collection ziva \
+The model and the collection are loaded ONCE at start-up, then you ask
+repeatedly inside the same process - no reloading the model for every
+question, which is what running the script per query would cost.
+
+Usage:
+    python -m tools.query_chroma --db-dir ./chroma_db --collection ziva \\
         --model intfloat/multilingual-e5-base
 
-    # pak se v promptu ptejte, dokud nenapíšete "exit"/"quit"/prázdný řádek
+    # then keep asking at the prompt until "exit", "quit" or an empty line
 
-Jednorázový dotaz z příkazové řádky (bez vstupu do smyčky) jde pořád přes
---query, pro rychlé skriptování/testování:
-    python query_chroma.py --db-dir ./chroma_db --collection ziva \
+A one-off query straight from the command line, without entering the
+loop, still goes through --query, for quick scripting and testing:
+    python -m tools.query_chroma --db-dir ./chroma_db --collection ziva \\
         --model intfloat/multilingual-e5-base --query "..."
 """
 import argparse
 
 import chromadb
 
-from magrag.embed import embed
-
 from magrag.console import setup_console
+from magrag.embed import embed
 
 
 def run_query(coll, model_name, query_text, top_k, year=None, chunk_type=None):
     query_vector = embed([query_text], model_name=model_name, is_query=True,
-                          show_progress=False)[0]
+                         show_progress=False)[0]
 
     conditions = []
     if year is not None:
@@ -39,57 +38,65 @@ def run_query(coll, model_name, query_text, top_k, year=None, chunk_type=None):
     elif len(conditions) > 1:
         where = {"$and": conditions}
 
-    result = coll.query(query_embeddings=[query_vector.tolist()], n_results=top_k, where=where)
+    result = coll.query(query_embeddings=[query_vector.tolist()],
+                        n_results=top_k, where=where)
 
-    print(f"\nDotaz: {query_text!r}")
+    print(f"\nQuery: {query_text!r}")
     if where:
-        print(f"Filtr: {where}")
+        print(f"Filter: {where}")
     print()
 
     if not result["ids"][0]:
-        print("(žádné výsledky)\n")
+        print("(no results)\n")
         return
 
     for i, (doc, meta, dist, cid) in enumerate(zip(
             result["documents"][0], result["metadatas"][0],
             result["distances"][0], result["ids"][0]), 1):
-        print(f"{i}. [kos. vzdálenost {dist:.3f}, nižší = podobnější] "
+        print(f"{i}. [cosine distance {dist:.3f}, lower = more similar] "
               f"{meta['title']} ({meta['year']}/{meta['issue']}, "
-              f"str. {meta['page_start']}-{meta['page_end']})")
-        print(f"   autoři: {meta['author'] or 'neuvedeno'} | typ: {meta['chunk_type']} | id: {cid}")
+              f"pp. {meta['page_start']}-{meta['page_end']})")
+        print(f"   authors: {meta['author'] or 'unknown'} | "
+              f"type: {meta['chunk_type']} | id: {cid}")
         print(f"   {doc[:200]}...")
         print()
 
 
 def main():
     setup_console()
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="query a Chroma collection interactively")
     ap.add_argument("--db-dir", required=True)
     ap.add_argument("--collection", default="ziva")
     ap.add_argument("--model", required=True,
-                     help="MUSÍ být stejný model, jakým se počítaly embeddingy chunků")
+                    help="MUST be the same model the chunk embeddings were "
+                         "computed with")
     ap.add_argument("--top-k", type=int, default=5)
     ap.add_argument("--year", type=int, default=None,
-                     help="volitelný filtr na metadata - jen tento ročník")
+                    help="optional metadata filter - this year only")
     ap.add_argument("--chunk-type", choices=["body", "caption"], default=None,
-                     help="volitelný filtr - jen tělo článků, nebo jen popisky obrázků")
+                    help="optional filter - article bodies only, or figure "
+                         "captions only")
     ap.add_argument("--query", default=None,
-                     help="jednorázový dotaz (bez tohohle se spustí interaktivní smyčka)")
+                    help="a one-off query; without it an interactive loop runs")
     args = ap.parse_args()
 
-    print("Připojuji se ke kolekci a nahrávám model (jen jednou) ...")
+    print("Connecting to the collection and loading the model (once) ...")
     client = chromadb.PersistentClient(path=args.db_dir)
     coll = client.get_collection(args.collection)
-    # "zahřátí" modelu hned na začátku, ať první dotaz v interaktivní
-    # smyčce neplatí načítací cenu navíc oproti dalším
-    embed(["zahřívací dotaz"], model_name=args.model, is_query=True, show_progress=False)
-    print(f"Připraveno ({coll.count()} položek v kolekci '{args.collection}').\n")
+    # Warm the model up right away, so the first query in the interactive
+    # loop does not pay the loading cost the later ones avoid.
+    embed(["warm-up query"], model_name=args.model, is_query=True,
+          show_progress=False)
+    print(f"Ready ({coll.count()} items in collection "
+          f"{args.collection!r}).\n")
 
     if args.query is not None:
-        run_query(coll, args.model, args.query, args.top_k, args.year, args.chunk_type)
+        run_query(coll, args.model, args.query, args.top_k, args.year,
+                  args.chunk_type)
         return
 
-    print("Zadejte dotaz (prázdný řádek nebo 'exit'/'quit' pro ukončení):")
+    print("Enter a query (an empty line, 'exit' or 'quit' ends the session):")
     while True:
         try:
             query_text = input("\n> ").strip()
@@ -97,9 +104,10 @@ def main():
             break
         if not query_text or query_text.lower() in ("exit", "quit"):
             break
-        run_query(coll, args.model, query_text, args.top_k, args.year, args.chunk_type)
+        run_query(coll, args.model, query_text, args.top_k, args.year,
+                  args.chunk_type)
 
-    print("Ukončeno.")
+    print("Finished.")
 
 
 if __name__ == "__main__":

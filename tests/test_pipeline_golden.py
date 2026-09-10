@@ -1,21 +1,23 @@
-"""Zlatý test celé extrakční části: dá tatáž PDF pořád tentýž výstup?
+"""A golden test of the whole extraction stack: does the same PDF still
+produce the same output?
 
-Problém, který tenhle test řeší: pipeline je jedna dlouhá heuristika a
-skoro každá úprava někde jinde v ní může tiše posunout výsledek o pár
-bloků. Ruční kontrola ("vypadá to pořád stejně") tohle nezachytí.
+The problem this test solves: the pipeline is one long heuristic, and
+almost any change anywhere in it can quietly shift the result by a few
+blocks. Checking by hand ("it still looks the same") does not catch that.
 
-Problém, který tenhle test má: vstupem je autorsky chráněné PDF a jeho
-výstupem plný text článků. Ani jedno nesmí do repozitáře.
+The problem this test has: the input is a copyrighted PDF and its output
+is the full text of articles. Neither may enter the repository.
 
-Řešení: fixture neobsahuje obsah, ale **otisk** - počty článků a bloků
-plus SHA-256 serializovaného výstupu každé fáze. Na změnu to reaguje
-stejně citlivě jako porovnání obsahu, ale nezveřejňuje z časopisu ani
-písmeno. Kdo PDF má, test si pustí; kdo ne, tomu se přeskočí.
+The solution: the fixture holds no content, only a **fingerprint** -
+counts of articles and blocks plus a SHA-256 of each stage's serialised
+output. It reacts to a change just as sensitively as comparing the
+content would, while publishing not one letter of the magazine. Whoever
+has the PDF can run it; for everyone else it skips.
 
-Vygenerování/aktualizace fixture (dělejte to vědomě, ne "ať to projde" -
-změna otisku znamená, že se změnil výstup pipeline):
+Generating or updating the fixture - do it deliberately, not to "make it
+pass": a changed fingerprint means the pipeline's output changed.
 
-    python -m tests.test_pipeline_golden --update cesta/k/cislu.pdf ziva
+    python -m tests.test_pipeline_golden --update path/to/issue.pdf ziva
 """
 import hashlib
 import json
@@ -33,8 +35,9 @@ from magrag.profiles import get
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "golden.json"
 
-# Kde se hledá zdrojové PDF. Proměnná prostředí má přednost, ať jde test
-# pustit i nad jiným číslem, než jaké má autor náhodou ve složce data/.
+# Where the source PDF is looked for. The environment variable wins, so
+# the test can also be run over an issue other than whichever one the
+# author happens to have in data/.
 ENV_VAR = "MAGRAG_GOLDEN_PDF"
 DEFAULT_PDF = Path("data") / "ziva-2014-6.pdf"
 
@@ -45,7 +48,7 @@ def digest(obj) -> str:
 
 
 def run_stages(pdf_path: str, profile):
-    """Extrakční část pipeline až po hotové články."""
+    """The extraction part of the pipeline, up to finished articles."""
     blocks = extract_pdf(pdf_path, profile)
     toc = build_toc(pdf_path, profile)
     page_map = build_page_map(blocks, profile)
@@ -87,7 +90,7 @@ def find_pdf():
 @pytest.fixture(scope="module")
 def golden():
     if not FIXTURE_PATH.is_file():
-        pytest.skip(f"chybí {FIXTURE_PATH} - vygenerujte ho, viz docstring")
+        pytest.skip(f"{FIXTURE_PATH} is missing - generate it, see the docstring")
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
@@ -96,18 +99,21 @@ def actual(golden):
     pdf = find_pdf()
     if pdf is None:
         pytest.skip(
-            f"zdrojové PDF není k dispozici (nastavte {ENV_VAR}, nebo dejte "
-            f"soubor do {DEFAULT_PDF}); do repozitáře nepatří kvůli právům")
+            f"the source PDF is not available (set {ENV_VAR}, or put the file "
+            f"in {DEFAULT_PDF}); it does not belong in the repository for "
+            f"rights reasons")
     if Path(pdf).name != golden["pdf_name"]:
-        pytest.skip(f"fixture je pro {golden['pdf_name']}, ne pro {Path(pdf).name}")
+        pytest.skip(f"the fixture is for {golden['pdf_name']}, "
+                    f"not {Path(pdf).name}")
     return fingerprint(pdf, get(golden["profile"]))
 
 
 @pytest.mark.parametrize("stage", ["blocks", "toc", "page_map", "articles"])
 def test_stage_output_is_unchanged(actual, golden, stage):
     assert actual["sha256"][stage] == golden["sha256"][stage], (
-        f"výstup fáze {stage!r} se změnil oproti zlatému otisku. Pokud je to "
-        f"záměr, aktualizujte fixture a v commitu popište, co se změnilo a proč."
+        f"the output of stage {stage!r} changed against the golden "
+        f"fingerprint. If that is intended, update the fixture and describe "
+        f"in the commit what changed and why."
     )
 
 
@@ -116,11 +122,12 @@ def test_counts_are_unchanged(actual, golden):
 
 
 def test_running_twice_gives_the_same_result(golden):
-    """Determinismus není samozřejmost - stačí, aby se někde v pipeline
-    iterovalo přes množinu, a pořadí bloků se začne mezi běhy měnit."""
+    """Determinism is not a given - it takes only one iteration over a
+    set somewhere in the pipeline for block order to start varying
+    between runs."""
     pdf = find_pdf()
     if pdf is None:
-        pytest.skip("zdrojové PDF není k dispozici")
+        pytest.skip("the source PDF is not available")
     profile = get(golden["profile"])
     assert fingerprint(pdf, profile) == fingerprint(pdf, profile)
 
@@ -130,7 +137,7 @@ def _update(pdf_path: str, profile_key: str):
     FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2),
                             encoding="utf-8")
-    print(f"zapsáno {FIXTURE_PATH}")
+    print(f"wrote {FIXTURE_PATH}")
     print(json.dumps(data["counts"], ensure_ascii=False, indent=2))
 
 

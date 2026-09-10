@@ -1,9 +1,10 @@
-"""Společné nastavení testů.
+"""Shared test setup.
 
-`setup_console()` tu není z rozmaru: pipeline během běhu vypisuje varování
-s diakritikou a na konzoli s kódováním cp1252 (výchozí stav na Windows) na
-nich spadne dřív, než se stihne cokoli ověřit. Test by pak selhal na
-kódování výpisu, ne na tom, co skutečně testuje.
+`setup_console()` is not here on a whim: the pipeline prints warnings
+containing text from the source PDF, and on a cp1252 console (the Windows
+default) it dies on them before anything can be verified. The test would
+then fail on the encoding of a message rather than on what it actually
+tests.
 """
 from magrag.console import setup_console
 

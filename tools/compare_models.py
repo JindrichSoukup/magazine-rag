@@ -1,19 +1,19 @@
-"""
-Porovnání kandidátních embedding modelů na pár otázek, u kterých ZNÁTE
-správnou odpověď (konkrétní article_id nebo aspoň podřetězec v title, co
-by se měl objevit mezi top-k výsledky).
+"""Compare candidate embedding models on a handful of questions whose
+right answer you KNOW - a specific article_id, or at least a substring of
+the title that ought to show up among the top-k results.
 
-Princip: pro každý model spočítej embeddingy všech chunků + embeddingy
-testovacích dotazů, najdi top-k nejbližších chunků (obyčejný numpy,
-žádná Chroma/FAISS potřeba pro tak malé srovnání) a zkontroluj, jestli je
-mezi nimi aspoň jeden chunk z očekávaného článku.
+How it works: for each model, embed every chunk plus the test queries,
+find the top-k nearest chunks (plain numpy; no Chroma or FAISS needed for
+a comparison this small) and check whether at least one chunk from the
+expected article is among them.
 
-Testovací dotazy si upravte v TEST_QUERIES níž - potřebujete jich jen
-5-10, ale musíte sám/sama vědět, který článek/chunk by měl vyjít jako
-odpověď (proto to nejde automatizovat/stáhnout odjinud).
+Edit TEST_QUERIES below for your own archive. Five to ten are enough, but
+you have to know yourself which article should come out as the answer -
+which is precisely why this cannot be automated or downloaded from
+anywhere.
 
-Použití:
-    python compare_models.py --input output/ziva_embedding_chunks.jsonl
+Usage:
+    python -m tools.compare_models --input output/chunks.jsonl
 """
 import argparse
 import json
@@ -22,13 +22,16 @@ from pathlib import Path
 
 import numpy as np
 
+from magrag.console import setup_console
 from magrag.embed import embed
 
-from magrag.console import setup_console
-
-# Upravte podle vlastního archivu a znalosti obsahu! "expect_title_substring"
-# je podřetězec, který by se měl objevit v title článku, jehož chunk čekáte
-# mezi top-k výsledky.
+# Adapt these to your own archive and your knowledge of its content.
+# "expect_title_substring" is a substring that should appear in the title
+# of the article whose chunk you expect among the top-k results.
+#
+# The queries below are in Czech because the corpus they were written for
+# is Czech: a retrieval test has to be in the language of the documents.
+# They are test data, not prose to translate.
 TEST_QUERIES = [
     {"query": "Co je mixotrofie u rostlin?",
      "expect_title_substring": "houbami"},
@@ -46,7 +49,7 @@ CANDIDATE_MODELS = [
     "intfloat/multilingual-e5-small",
     "intfloat/multilingual-e5-base",
     "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-    # "BAAI/bge-m3",  # velký model / pomalé stažení - odkomentujte, až budete chtít
+    # "BAAI/bge-m3",  # large model, slow download - uncomment when wanted
 ]
 
 TOP_K = 5
@@ -62,8 +65,8 @@ def evaluate_model(model_name: str, chunks, chunk_vectors):
     rows = []
     for tq in TEST_QUERIES:
         q_vec = embed([tq["query"]], model_name=model_name, is_query=True,
-                       show_progress=False)[0]
-        scores = chunk_vectors @ q_vec  # normalizované vektory -> kosinová podobnost
+                      show_progress=False)[0]
+        scores = chunk_vectors @ q_vec  # normalised vectors -> cosine similarity
         top_idx = np.argsort(-scores)[:TOP_K]
 
         found = any(tq["expect_title_substring"].lower() in chunks[i]["title"].lower()
@@ -79,15 +82,16 @@ def evaluate_model(model_name: str, chunks, chunk_vectors):
 
 def main():
     setup_console()
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, help="ziva_embedding_chunks.jsonl")
+    ap = argparse.ArgumentParser(
+        description="compare candidate embedding models on known-answer queries")
+    ap.add_argument("--input", required=True, help="chunks.jsonl")
     ap.add_argument("--verbose", action="store_true",
-                     help="vypiš i top-k výsledky pro každý dotaz/model")
+                    help="also print the top-k results for each query and model")
     args = ap.parse_args()
 
     chunks = load_chunks(Path(args.input))
-    print(f"Načteno {len(chunks)} chunků, {len(TEST_QUERIES)} testovacích dotazů, "
-          f"{len(CANDIDATE_MODELS)} modelů k porovnání.\n")
+    print(f"Loaded {len(chunks)} chunks, {len(TEST_QUERIES)} test queries, "
+          f"{len(CANDIDATE_MODELS)} models to compare.\n")
 
     texts = [c["embedding_text"] for c in chunks]
     results = {}
@@ -96,21 +100,21 @@ def main():
         print(f"=== {model_name} ===")
         t0 = time.time()
         chunk_vectors = embed(texts, model_name=model_name, is_query=False,
-                               show_progress=False)
+                              show_progress=False)
         hits, rows = evaluate_model(model_name, chunks, chunk_vectors)
         dt = time.time() - t0
         results[model_name] = hits
-        print(f"  trefeno {hits}/{len(TEST_QUERIES)} dotazů (čas: {dt:.1f}s "
-              f"na {len(chunks)} chunků)")
+        print(f"  hit {hits}/{len(TEST_QUERIES)} queries ({dt:.1f}s for "
+              f"{len(chunks)} chunks)")
         if args.verbose:
             for r in rows:
-                mark = "✓" if r["found"] else "✗"
+                mark = "OK  " if r["found"] else "MISS"
                 print(f"    {mark} {r['query']!r}")
                 for t in r["top_titles"]:
                     print(f"        - {t[:60]}")
         print()
 
-    print("=== Souhrn ===")
+    print("=== Summary ===")
     for model_name, hits in sorted(results.items(), key=lambda kv: -kv[1]):
         print(f"  {hits}/{len(TEST_QUERIES)}  {model_name}")
 

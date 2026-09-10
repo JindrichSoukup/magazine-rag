@@ -1,8 +1,9 @@
-"""Klasifikace bloků: ruční profil vs. adaptivní.
+"""Block classification: hand-written profile vs. adaptive.
 
-Testy schválně nepoužívají žádný text ze skutečného časopisu - pracují se
-syntetickými bloky, u kterých je z konstrukce jasné, co má vyjít. Živa je
-autorsky chráněná a MagPi tady není potřeba; testuje se pravidlo, ne obsah.
+These tests deliberately use no text from a real magazine - they work on
+synthetic blocks where the expected outcome is clear by construction.
+Živa is under copyright and The MagPi is not needed here: what is being
+tested is the rule, not the content.
 """
 import pytest
 
@@ -18,7 +19,7 @@ ZIVA = get("ziva")
 ADAPTIVE = get("adaptive")
 
 
-# --- rozklad jména fontu ---------------------------------------------------
+# --- taking a font name apart ----------------------------------------------
 
 @pytest.mark.parametrize("font,expected", [
     ("MeliorCE", "MeliorCE"),
@@ -32,39 +33,40 @@ def test_font_family_strips_subset_prefix_and_style(font, expected):
     assert font_family(font) == expected
 
 
-# --- ruční profil (Živa) ---------------------------------------------------
+# --- the hand-written profile (Živa) ---------------------------------------
 
 @pytest.mark.parametrize("font,size,expected", [
-    ("MeliorCE-Bold", 21.0, "title"),      # titulek článku
-    ("MeliorCE-Bold", 18.0, "title"),      # přesně na hranici
-    ("MeliorCE-Bold", 15.0, "heading"),    # nadpis kapitoly
-    ("MeliorCE", 13.0, "heading"),         # podnadpis v zadní části čísla
-    ("MeliorCE", 12.0, "other"),           # řádek s autorem
-    ("MeliorCE", 9.0, "body"),             # běžný text
-    ("HelveticaCE", 7.0, "caption"),       # popisek obrázku
-    ("HelveticaCE-Bold", 40.0, "title"),   # velké číslo na obálce
-    ("HelveticaCE-Bold", 11.0, "other"),   # titulek na obálce
-    ("ZapfDingbats", 9.0, "body"),         # neznámá rodina -> fallback
+    ("MeliorCE-Bold", 21.0, "title"),      # article title
+    ("MeliorCE-Bold", 18.0, "title"),      # exactly on the boundary
+    ("MeliorCE-Bold", 15.0, "heading"),    # chapter heading
+    ("MeliorCE", 13.0, "heading"),         # subheading in the back matter
+    ("MeliorCE", 12.0, "other"),           # the author line
+    ("MeliorCE", 9.0, "body"),             # body text
+    ("HelveticaCE", 7.0, "caption"),       # figure caption
+    ("HelveticaCE-Bold", 40.0, "title"),   # the big number on the cover
+    ("HelveticaCE-Bold", 11.0, "other"),   # a cover blurb
+    ("ZapfDingbats", 9.0, "body"),         # unknown family -> fallback
 ])
 def test_ziva_classification(font, size, expected):
-    assert classify_block(ZIVA, "Nějaký neutrální text.", font, size) == expected
+    assert classify_block(ZIVA, "Some neutral text.", font, size) == expected
 
 
 def test_ziva_footer_never_becomes_heading():
-    """Patička je vysázená tučně a mohla by projít jako nadpis - profil ji
-    proto odchytí dřív, než se na ni dostane pravidlo podle velikosti."""
+    """The footer is set in bold and could pass as a heading, so the
+    profile catches it before any size rule gets to it."""
     assert classify_block(ZIVA, "ziva.avcr.cz 262 živa 6/2014",
                           "MeliorCE-Bold", 21.0) == "body"
 
 
 def test_ziva_unknown_size_falls_back_within_its_own_family():
-    """Neznámá velikost v patkové rodině je text, v bezpatkové popisek -
-    fallback se nesmí "propadnout" do druhé rodiny."""
+    """An unknown size in the serif family is text, in the sans family a
+    caption - the fallback must not "fall through" into the other
+    family."""
     assert classify_block(ZIVA, "text", "MeliorCE", 6.0) == "body"
     assert classify_block(ZIVA, "text", "HelveticaCE", 6.0) == "caption"
 
 
-# --- editorská hantýrka na obrázcích ---------------------------------------
+# --- editorial furniture on figures ----------------------------------------
 
 @pytest.mark.parametrize("text", [
     "1 cm",
@@ -79,7 +81,7 @@ def test_diagram_annotation_detected(text):
 
 
 @pytest.mark.parametrize("text", [
-    "Pohled na vzorek z boku.",
+    "A view of the sample from the side.",
     "substantia nigra",
     "",
 ])
@@ -88,22 +90,24 @@ def test_diagram_annotation_not_overreaching(text):
 
 
 def test_annotation_only_in_families_that_ask_for_it():
-    """Popiskovou rodinu smí anotace přebít; textovou ne - jinak by se
-    z odstavce začínajícího výčtem čísel stala 'annotation'."""
+    """The caption family may be overridden by an annotation; the text
+    family may not - otherwise a paragraph opening with a run of numbers
+    would turn into an 'annotation'."""
     assert classify_block(ZIVA, "1 2 3 4", "HelveticaCE", 7.0) == "annotation"
     assert classify_block(ZIVA, "1 2 3 4", "MeliorCE", 9.0) == "body"
 
 
-# --- adaptivní profil ------------------------------------------------------
+# --- the adaptive profile --------------------------------------------------
 
 def _stats(body_family="BodyFont", body_size=10.0):
     return DocumentStats(body_size=body_size, body_family=body_family)
 
 
 def test_document_stats_weighs_by_characters_not_by_span_count():
-    """Titulků je na stránce hodně kusů, ale málo textu. Kdyby se počítaly
-    spany místo znaků, referenční velikost by mohl určit popisek."""
-    spans = [("Nadpis", "TitleFont", 24.0)] * 20 + \
+    """A page carries many titles but little of their text. Counting
+    spans instead of characters could let a caption decide the reference
+    size."""
+    spans = [("Heading", "TitleFont", 24.0)] * 20 + \
             [("x" * 200, "BodyFont", 10.0)] * 3
     stats = DocumentStats.from_spans(spans)
     assert stats.body_family == "BodyFont"
@@ -111,8 +115,9 @@ def test_document_stats_weighs_by_characters_not_by_span_count():
 
 
 def test_document_stats_buckets_near_identical_sizes():
-    """PDF běžně vysází tentýž text jako 9.0 i 9.02 - bez zaokrouhlení by
-    se histogram rozpadl na desítky skoro shodných tříd."""
+    """A PDF routinely sets the same text as 9.0 and 9.02 - without
+    rounding, the histogram would shatter into dozens of near-identical
+    classes."""
     spans = [("x" * 100, "BodyFont", 9.0), ("y" * 100, "BodyFont", 9.02)]
     assert DocumentStats.from_spans(spans).body_size == 9.0
 
@@ -123,12 +128,12 @@ def test_document_stats_on_empty_document_does_not_divide_by_zero():
 
 
 @pytest.mark.parametrize("size,bold,expected", [
-    (20.0, True, "title"),      # 2,0x text
-    (17.0, False, "title"),     # 1,7x text, na hranici
-    (13.0, True, "heading"),    # 1,3x text
-    (10.0, True, "heading"),    # tučné ve velikosti textu = podnadpis
-    (10.0, False, "body"),      # běžný text
-    (7.0, False, "body"),       # menší, ale pořád rodina textu
+    (20.0, True, "title"),      # 2.0x the text
+    (17.0, False, "title"),     # 1.7x the text, on the boundary
+    (13.0, True, "heading"),    # 1.3x the text
+    (10.0, True, "heading"),    # bold at text size = a subheading
+    (10.0, False, "body"),      # body text
+    (7.0, False, "body"),       # smaller, but still the text family
 ])
 def test_adaptive_classification_is_relative_to_body_size(size, bold, expected):
     font = "BodyFont-Bold" if bold else "BodyFont"
@@ -136,10 +141,12 @@ def test_adaptive_classification_is_relative_to_body_size(size, bold, expected):
 
 
 def test_adaptive_scales_with_the_document():
-    """Totéž pravidlo musí platit i pro časopis sázený o třetinu větším
-    písmem - to je celý smysl relativních pravidel."""
-    small = classify_block(ADAPTIVE, "text", "BodyFont-Bold", 20.0, _stats(body_size=10.0))
-    large = classify_block(ADAPTIVE, "text", "BodyFont-Bold", 30.0, _stats(body_size=15.0))
+    """The same rule has to hold for a magazine set a third larger -
+    that is the whole point of relative rules."""
+    small = classify_block(ADAPTIVE, "text", "BodyFont-Bold", 20.0,
+                           _stats(body_size=10.0))
+    large = classify_block(ADAPTIVE, "text", "BodyFont-Bold", 30.0,
+                           _stats(body_size=15.0))
     assert small == large == "title"
 
 
@@ -148,26 +155,27 @@ def test_adaptive_other_family_falls_back_to_caption():
 
 
 def test_adaptive_without_stats_fails_loudly():
-    """Tiše klasifikovat všechno jako 'body' by byla přesně ta chyba, co se
-    v korpusu pozná až za tři fáze."""
+    """Silently classifying everything as 'body' would be exactly the
+    kind of bug that only shows up three stages later in the corpus."""
     with pytest.raises(ValueError):
         classify_block(ADAPTIVE, "text", "BodyFont", 10.0)
 
 
-# --- optická velikost ve jménu fontu ---------------------------------------
+# --- optical size inside a font name ---------------------------------------
 
 def test_optical_size_in_the_font_name_is_not_part_of_the_family():
-    """"RobotoSerif-20ptRegular" a "RobotoSerif-Italic" je tentýž text
-    v jiném řezu. Kdyby vyšly jako dvě rodiny, kurzívou vysázená část
-    titulku v obsahu by se zahodila jako cizí styl."""
+    """"RobotoSerif-20ptRegular" and "RobotoSerif-Italic" are the same
+    text in a different weight. If they came out as two families, an
+    italic run inside a contents title would be dropped as a foreign
+    style."""
     assert font_family("RobotoSerif-20ptRegular") == "RobotoSerif"
     assert font_family("RobotoSerif-20ptRegular") == font_family("RobotoSerif-Italic")
 
 
 def test_similar_family_names_stay_apart():
-    """Roboto, RobotoSerif, RobotoSlab a RobotoMono jsou čtyři různé
-    rodiny - u MagPi je podle nich vidět rozdíl mezi položkou obsahu,
-    názvem rubriky a patičkou."""
+    """Roboto, RobotoSerif, RobotoSlab and RobotoMono are four different
+    families - in The MagPi they are what distinguishes a contents entry
+    from a section heading and from the footer."""
     families = {font_family(f) for f in
                 ("Roboto-Black", "RobotoSerif-Italic", "RobotoSlab-Light",
                  "RobotoMono-Light", "RobotoCondensed-Light")}

@@ -1,27 +1,29 @@
-"""Kalibrace nového profilu: co je v tom PDF vlastně za sazbu?
+"""Calibrating a new profile: what typesetting is actually in this PDF?
 
-Napsat profil pro nový časopis znamená odpovědět na tři otázky: jaké fonty
-se v něm používají, jaké velikosti písma odpovídají titulku / nadpisu /
-běžnému textu, a jak vypadá běžící patička. Hádat se to nedá a otevírat
-PDF v prohlížeči a měřit odhadem taky ne - tenhle skript ty tři odpovědi
-z PDF prostě vypíše.
+Writing a profile for a new magazine means answering three questions:
+which fonts it uses, which point sizes correspond to a title, a heading
+and body text, and what its running footer looks like. You cannot guess
+those, and opening the PDF in a viewer and eyeballing sizes is not much
+better - this script simply prints the three answers out of the PDF.
 
-Výstup má tři části:
+The output has three parts:
 
-  1. **Histogram sazby** - kolik znaků je vysázeno kterou kombinací
-     (rodina písma, velikost, řez). Vážení podle ZNAKŮ, ne podle počtu
-     bloků, je záměr: nejobjemnější řádek histogramu je z definice běžný
-     text článku a slouží jako referenční velikost pro všechno ostatní.
-  2. **Návrh pravidel** - hotový blok kódu k vložení do nového profilu,
-     odvozený z histogramu. Není to hotová pravda, je to odrazový můstek:
-     projděte si ukázky u každé velikosti a rozhodněte, co je opravdu
-     titulek a co jen tučný odstavec.
-  3. **Kandidáti na patičku** - malé texty u okraje stránky, které se
-     opakují napříč čísly. Podle nich se vyplní footer_* v profilu.
+  1. **A typography histogram** - how many characters are set in each
+     (font family, size, weight) combination. Weighting by CHARACTERS
+     rather than by block count is deliberate: the most voluminous row
+     of the histogram is by definition the article's body text and
+     serves as the reference size for everything else.
+  2. **Suggested rules** - a ready-made block of code to paste into a
+     new profile, derived from the histogram. It is not finished truth,
+     it is a starting point: read the samples at each size and decide
+     what really is a title and what is merely a bold paragraph.
+  3. **Footer candidates** - small text near the page edge, and how
+     often a bare number appears there. The footer_* settings in the
+     profile follow from this.
 
-Použití:
-    python -m tools.inspect_fonts cesta/k/cislu.pdf
-    python -m tools.inspect_fonts cesta/k/cislu.pdf --samples 5 --pages 20
+Usage:
+    python -m tools.inspect_fonts path/to/issue.pdf
+    python -m tools.inspect_fonts path/to/issue.pdf --samples 5 --pages 20
 """
 import argparse
 import re
@@ -32,21 +34,22 @@ import fitz
 from magrag.console import setup_console
 from magrag.typography import font_family, is_bold_font
 
-# Kolik nejobjemnějších kombinací se vypisuje. Nad tuhle hranici už jsou
-# jen jednotlivé přeteklé spany, ze kterých se pravidlo stejně neodvozuje.
+# How many of the most voluminous combinations are printed. Beyond this
+# there are only stray overflow spans, which no rule would be derived
+# from anyway.
 TOP_COMBINATIONS = 15
 
-# Holé číslo stránky u okraje - arabské i římské. Podle toho, jak často
-# takové číslo v čísle je, se vybírá strategie detekce patičky.
+# A bare page number near the edge, Arabic or Roman. How often such a
+# number occurs decides which footer-detection strategy to recommend.
 PAGE_NUMBER_RE = re.compile(r"\d{1,4}|[IVXLCDMivxlcdm]{1,10}")
 
 
 def collect(doc, max_pages=None):
-    """Projdi dokument a posbírej statistiku sazby po spanech."""
-    by_style = Counter()          # (rodina, velikost, tučnost) -> počet znaků
-    samples = defaultdict(list)   # totéž -> ukázky textu
-    footer_candidates = Counter()  # text u okraje stránky -> kolikrát se objevil
-    numeric_pages = set()          # stránky, kde u okraje stojí holé číslo
+    """Walk the document and gather typography statistics per span."""
+    by_style = Counter()           # (family, size, bold) -> character count
+    samples = defaultdict(list)    # the same -> sample texts
+    footer_candidates = Counter()  # text near the page edge -> occurrences
+    numeric_pages = set()          # pages with a bare number near the edge
 
     scanned = doc.page_count if max_pages is None else min(max_pages, doc.page_count)
     for page_index in range(scanned):
@@ -65,27 +68,28 @@ def collect(doc, max_pages=None):
                     if len(samples[key]) < 20:
                         samples[key].append(text)
 
-                    # patička: malý text v horní/dolní desetině stránky
+                    # footer: small text in the top or bottom tenth
                     y0, y1 = span["bbox"][1], span["bbox"][3]
                     near_edge = (y0 >= page_height * 0.90
                                  or y1 <= page_height * 0.10)
                     if near_edge and span["size"] < 12 and len(text.split()) <= 6:
                         footer_candidates[text] += 1
                         if PAGE_NUMBER_RE.fullmatch(text):
-                            # počítají se STRÁNKY, ne výskyty: číslo stránky
-                            # bývá vysázené dvakrát (nahoře i dole) a součet
-                            # výskytů by pak přesáhl počet stránek
+                            # Count PAGES, not occurrences: the page
+                            # number is often set twice, at the top and
+                            # the bottom, so summing occurrences would
+                            # exceed the page count.
                             numeric_pages.add(page_index)
     return by_style, samples, footer_candidates, numeric_pages, scanned
 
 
 def print_histogram(by_style, samples, n_samples):
     total = sum(by_style.values()) or 1
-    print("=== Histogram sazby (podle počtu znaků) ===\n")
-    print(f"{'rodina':<28} {'vel.':>6} {'řez':>6} {'znaků':>9} {'podíl':>7}")
+    print("=== Typography histogram (by character count) ===\n")
+    print(f"{'family':<28} {'size':>6} {'weight':>7} {'chars':>9} {'share':>7}")
     print("-" * 72)
     for (family, size, bold), count in by_style.most_common(TOP_COMBINATIONS):
-        print(f"{family[:28]:<28} {size:>6} {'bold' if bold else '':>6} "
+        print(f"{family[:28]:<28} {size:>6} {'bold' if bold else '':>7} "
               f"{count:>9} {count / total:>6.1%}")
         for sample in samples[(family, size, bold)][:n_samples]:
             print(f"        | {sample[:80]}")
@@ -93,15 +97,15 @@ def print_histogram(by_style, samples, n_samples):
 
 
 def suggest_rules(by_style):
-    """Z histogramu odvoď návrh pravidel do profilu.
+    """Derive a suggested set of profile rules from the histogram.
 
-    Referenční velikost = nejobjemnější kombinace. Prahy odpovídají těm
-    v profiles/adaptive.py, jen se tady rovnou přepočítají na absolutní
-    body, aby šly zapsat jako SizeRule.
+    The reference size is the most voluminous combination. The
+    thresholds are the ones in profiles/adaptive.py, converted here into
+    absolute points so they can be written as SizeRule.
     """
     if not by_style:
-        print("V dokumentu není žádný text - je to sken bez OCR?\n"
-              "Tahle pipeline potřebuje born-digital PDF s vloženými fonty.")
+        print("There is no text in this document - is it a scan without OCR?\n"
+              "This pipeline needs a born-digital PDF with embedded fonts.")
         return
 
     (body_family, body_size, _), _ = by_style.most_common(1)[0]
@@ -110,10 +114,10 @@ def suggest_rules(by_style):
         families[family] += count
     other = [f for f, _ in families.most_common() if f != body_family][:3]
 
-    print("=== Návrh do profilu (zkontrolujte podle ukázek výše!) ===\n")
-    print(f"# referenční sazba: {body_family} @ {body_size} b")
+    print("=== Suggested profile (check it against the samples above!) ===\n")
+    print(f"# reference typesetting: {body_family} @ {body_size} pt")
     print("SERIF = FontFamily(")
-    print(f'    name="text",')
+    print('    name="text",')
     print(f'    prefixes=("{body_family}",),')
     print("    rules=(")
     print(f'        SizeRule("title", size_min={round(body_size * 1.7, 1)}, bold=True),')
@@ -125,7 +129,7 @@ def suggest_rules(by_style):
     print('    fallback="body",')
     print(")")
     print("SANS = FontFamily(")
-    print(f'    name="captions",')
+    print('    name="captions",')
     print(f'    prefixes=({", ".join(chr(34) + f + chr(34) for f in other)},),')
     print("    rules=(")
     print(f'        SizeRule("title", size_min={round(body_size * 3, 1)}),')
@@ -133,22 +137,24 @@ def suggest_rules(by_style):
     print('    fallback="caption",')
     print("    detect_annotations=True,")
     print(")\n")
-    print("Když se prahy z ukázek nepotvrdí, není nutné je ladit ručně - "
-          "profil může\nmísto toho nastavit adaptive=True a nechat referenční "
-          "velikost odvodit\nz dokumentu za běhu (viz profiles/adaptive.py).\n")
+    print("If the samples do not bear these thresholds out, there is no need "
+          "to tune them\nby hand - the profile can instead set adaptive=True "
+          "and have the reference\nsize derived from the document at runtime "
+          "(see profiles/adaptive.py).\n")
 
 
 def print_footers(footer_candidates, numeric_pages, doc_pages):
-    """Vypiš, co se u okraje stránky opakuje - a zvlášť, kolikrát tam stojí
-    holé číslo.
+    """Print what repeats near the page edge - and, separately, how often
+    a bare number stands there.
 
-    Ty dvě věci se musí počítat každá jinak, jinak se ta důležitější ztratí:
-    název časopisu v patičce je na každé stránce **týž řetězec**, kdežto
-    číslo stránky je na každé stránce **jiné**. Filtr na "opakuje se" tedy
-    čísla stránek spolehlivě schová, i když jsou to přesně ony, podle
-    kterých se rozhoduje mezi oběma strategiemi detekce.
+    Those two have to be counted differently, or the more important one
+    is lost: the magazine's name in the footer is the SAME string on
+    every page, whereas the page number is DIFFERENT on every page. A
+    "does it repeat" filter therefore hides page numbers reliably, even
+    though they are exactly what decides between the two detection
+    strategies.
     """
-    print("=== Kandidáti na běžící patičku ===\n")
+    print("=== Running-footer candidates ===\n")
 
     numeric = len(numeric_pages)
     repeated = [(t, n) for t, n in footer_candidates.most_common(20)
@@ -156,26 +162,29 @@ def print_footers(footer_candidates, numeric_pages, doc_pages):
                 and not PAGE_NUMBER_RE.fullmatch(t.strip())]
 
     if repeated:
-        print("Opakující se text u okraje stránky:")
+        print("Text repeating near the page edge:")
         for text, n in repeated:
             print(f"  {n:>4}x  {text[:70]}")
         print()
-    print(f"Stránek s holým číslem u okraje: {numeric} z {doc_pages}\n")
+    print(f"Pages with a bare number near the edge: {numeric} of {doc_pages}\n")
 
     if numeric >= doc_pages * 0.4:
-        print('Doporučení: footer_detection="position" - číslo stránky je\n'
-              "u okraje na většině stránek a dá se najít podle polohy.")
+        print('Recommendation: footer_detection="position" - the page number '
+              "is near\nthe edge on most pages and can be found by position.")
         if repeated:
-            print('(Strategie "keyword" by taky šla, viz opakující se text '
-                  "výše, ale\npoloha je jednodušší a nezávisí na jazyce.)")
+            print('("keyword" would work too, given the repeating text above, '
+                  "but position\nis simpler and does not depend on the "
+                  "language.)")
     elif repeated:
-        print('Doporučení: footer_detection="keyword" - holé číslo se u '
-              "okraje\nnenašlo dost často, ale opakuje se tam text výše. "
-              "Podle něj vyplňte\nfooter_keywords a footer_pattern.")
+        print('Recommendation: footer_detection="keyword" - a bare number was '
+              "not found\nnear the edge often enough, but the text above does "
+              "repeat there. Fill in\nfooter_keywords and footer_pattern from "
+              "it.")
     else:
-        print("U okraje stránky se neopakuje nic a holá čísla tam nejsou.\n"
-              'Časopis možná běžící patičku nemá - pak footer_detection="none"\n'
-              "a počítejte s tím, že se články nenamapují na tištěné stránky.")
+        print("Nothing repeats near the page edge and there are no bare "
+              "numbers there.\nThe magazine may have no running footer - then "
+              'footer_detection="none",\nand expect articles not to map onto '
+              "printed pages.")
     print()
 
 
@@ -184,21 +193,21 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("pdf")
     ap.add_argument("--pages", type=int, default=None,
-                    help="prohlédnout jen prvních N stránek (rychlejší)")
+                    help="look at the first N pages only (faster)")
     ap.add_argument("--samples", type=int, default=3,
-                    help="kolik ukázek textu vypsat u každé kombinace")
+                    help="how many sample texts to print per combination")
     args = ap.parse_args()
 
     doc = fitz.open(args.pdf)
     by_style, samples, footers, numeric_pages, scanned = collect(doc, args.pages)
 
-    partial = f" (prohlédnuto prvních {scanned})" if scanned < doc.page_count else ""
-    print(f"\n{args.pdf}: {doc.page_count} stránek{partial}\n")
+    partial = f" (first {scanned} examined)" if scanned < doc.page_count else ""
+    print(f"\n{args.pdf}: {doc.page_count} pages{partial}\n")
     print_histogram(by_style, samples, args.samples)
     suggest_rules(by_style)
-    # Jmenovatelem musí být počet PROHLÉDNUTÝCH stránek, ne celého čísla -
-    # jinak se podíly počítají proti stránkám, do kterých se skript vůbec
-    # nepodíval, a doporučení vyjde naopak.
+    # The denominator must be the number of pages EXAMINED, not of the
+    # whole issue - otherwise the shares are computed against pages the
+    # script never looked at, and the recommendation comes out backwards.
     print_footers(footers, numeric_pages, scanned)
 
 

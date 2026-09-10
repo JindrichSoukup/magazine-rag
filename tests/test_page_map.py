@@ -1,9 +1,9 @@
-"""Mapování tištěných čísel stránek na stránky PDF.
+"""Mapping printed page numbers onto PDF pages.
 
-Tohle je nejzrádnější obecná část pipeline: v jednom čísle časopisu se
-běžně střídají arabské a římské číslování a každý takový úsek má jiný
-posun vůči stránkám PDF. Testy popisují právě ty případy, které se na
-reálném archivu ukázaly jako skutečné chyby.
+This is the trickiest generic part of the pipeline: a single issue
+routinely alternates between Arabic and Roman numbering, and each such
+run has a different offset from the PDF pages. These tests describe
+exactly the cases that turned out to be real bugs on a real archive.
 """
 import pytest
 
@@ -15,6 +15,7 @@ from magrag.build_page_map import (
     int_to_label,
     int_to_roman,
     label_to_int,
+    normalize_label,
     roman_to_int,
 )
 from magrag.profiles import get
@@ -23,7 +24,7 @@ ZIVA = get("ziva")
 MAGPI = get("magpi")
 
 
-# --- římské číslice --------------------------------------------------------
+# --- Roman numerals --------------------------------------------------------
 
 @pytest.mark.parametrize("roman,value", [
     ("I", 1), ("IV", 4), ("XL", 40), ("CXXXIII", 133), ("MCMXCIV", 1994),
@@ -34,17 +35,18 @@ def test_roman_round_trip(roman, value):
 
 
 def test_roman_is_case_insensitive():
-    """Sazečský šotek: v reálném čísle se objevilo "CXLVIiI" s malým i.
-    Bez normalizace se celá stránka nepřiřadila k žádnému úseku."""
+    """A typesetting slip: a real issue contained "CXLVIiI" with a
+    lowercase i. Without normalising, the whole page was assigned to no
+    run at all."""
     scheme, value = label_to_int("CXLVIiI")
     assert scheme == "roman"
     assert value == roman_to_int("CXLVIII")
 
 
 def test_single_letter_roman_is_a_valid_page_label():
-    """Dřív se jednopísmenné číslice ("I", "V", "X") zahazovaly jako
-    nejednoznačné. Byla to chyba - v okamžiku, kdy se dívám na token,
-    už mám ověřené, že celý řádek je patička."""
+    """Single-letter numerals ("I", "V", "X") used to be discarded as
+    ambiguous. That was wrong - by the time we look at a token, the
+    whole line is already confirmed to be a footer."""
     assert label_to_int("V") == ("roman", 5)
 
 
@@ -53,7 +55,7 @@ def test_arabic_beats_roman_for_pure_digits():
     assert int_to_label("arabic", 262) == "262"
 
 
-# --- vytažení popisku z patičky -------------------------------------------
+# --- pulling the label out of a footer -------------------------------------
 
 @pytest.mark.parametrize("text,expected", [
     ("ziva.avcr.cz 262 živa 6/2014", "262"),
@@ -65,25 +67,25 @@ def test_extract_label_from_running_footer(text, expected):
 
 
 def test_extract_label_ignores_issue_over_year_token():
-    """"6/2014" je číslo/ročník, nikdy ne číslo stránky - kdyby se vzalo,
-    celý úsek číslování by dostal nesmyslný posun."""
+    """"6/2014" is the issue over the year, never a page number - taking
+    it would give the whole numbering run a nonsensical offset."""
     assert extract_label("živa 6/2014 ziva.avcr.cz", ZIVA) is None
 
 
 def test_extract_label_requires_the_line_to_be_a_footer():
-    assert extract_label("V roce 262 př. n. l. se stalo...", ZIVA) is None
+    assert extract_label("In the year 262 BC something happened...", ZIVA) is None
 
 
-# --- souvislé úseky číslování ---------------------------------------------
+# --- contiguous numbering runs ---------------------------------------------
 
 def test_find_runs_splits_on_changed_offset():
-    """Reálný případ: hlavní články arabsky, příloha římsky, pak arabsky
-    znovu - "arabské číslování" tedy nejsou jedny čísla s jedním posunem,
-    ale dva různé úseky."""
+    """A real case: main articles in Arabic, the supplement in Roman,
+    then Arabic again - so "Arabic numbering" is not one set of numbers
+    with one offset, but two separate runs."""
     detections = [
-        (4, "arabic", 262), (5, "arabic", 263),      # posun -258
-        (26, "roman", 133), (27, "roman", 134),      # posun -107
-        (58, "arabic", 285), (59, "arabic", 286),    # posun -227
+        (4, "arabic", 262), (5, "arabic", 263),      # offset -258
+        (26, "roman", 133), (27, "roman", 134),      # offset -107
+        (58, "arabic", 285), (59, "arabic", 286),    # offset -227
     ]
     runs = find_runs(detections)
     assert [r["offset"] for r in runs] == [-258, -107, -227]
@@ -92,8 +94,8 @@ def test_find_runs_splits_on_changed_offset():
 
 
 def test_find_runs_bridges_a_page_without_a_footer():
-    """Celostránková fotka nemá patičku. Dokud se detekce před ní a za ní
-    shodnou na posunu, je to pořád jeden úsek."""
+    """A full-page photo has no footer. As long as the detections either
+    side agree on the offset, it is still one run."""
     detections = [(4, "arabic", 262), (6, "arabic", 264)]
     runs = find_runs(detections)
     assert len(runs) == 1
@@ -103,14 +105,16 @@ def test_find_runs_bridges_a_page_without_a_footer():
 def test_extend_runs_fills_missing_edge_pages():
     runs = [{"scheme": "arabic", "offset": -258, "value_min": 262, "value_max": 270}]
     extended = extend_runs_into_gaps(runs, total_pdf_pages=20, max_extend=5)
-    # dopředu se dá jen o 3 (PDF stránka 1 je dno), dozadu narazí na strop
+    # forwards it can only go 3 (PDF page 1 is the floor); backwards it
+    # hits the max_extend cap
     assert extended[0]["value_min"] == 259
     assert extended[0]["value_max"] == 275
 
 
 def test_extend_runs_never_steals_a_page_from_a_neighbour():
-    """Dva sousední úseky si nesmí nárokovat tutéž stránku PDF - to byl
-    reálný nález, kdy římská příloha přetáhla stránku arabskému úseku."""
+    """Two adjacent runs must not both claim the same PDF page - that
+    was a real finding, where the Roman supplement pulled a page away
+    from the Arabic run."""
     runs = [
         {"scheme": "arabic", "offset": 0, "value_min": 1, "value_max": 5},
         {"scheme": "roman", "offset": 5, "value_min": 1, "value_max": 5},
@@ -119,10 +123,10 @@ def test_extend_runs_never_steals_a_page_from_a_neighbour():
     pages = []
     for r in extended:
         pages += [v + r["offset"] for v in range(r["value_min"], r["value_max"] + 1)]
-    assert len(pages) == len(set(pages)), "úseky si ukradly stránku"
+    assert len(pages) == len(set(pages)), "the runs stole a page from each other"
 
 
-# --- celé mapování ---------------------------------------------------------
+# --- the whole mapping -----------------------------------------------------
 
 def _footer(page, text, y=800.0):
     return {"page": page, "block_id": 0, "type": "body", "text": text,
@@ -138,8 +142,8 @@ def test_build_page_map_resolves_labels_to_pdf_pages():
 
 
 def test_position_strategy_finds_a_bare_page_number():
-    """MagPi má v patičce jen číslo, na obsah se chytit nedá - musí
-    rozhodnout poloha u dolního okraje stránky."""
+    """The MagPi's footer holds only a number, so there is no content to
+    latch onto - position near the bottom edge has to decide."""
     blocks = [
         {"page": p, "block_id": 0, "type": "body", "text": str(p),
          "font": "SomeSans", "font_size": 8.0,
@@ -151,12 +155,13 @@ def test_position_strategy_finds_a_bare_page_number():
 
 
 def test_position_strategy_ignores_a_number_in_the_middle_of_the_page():
-    """Číslo v rohu grafu není číslo stránky - o tom rozhoduje poloha."""
+    """A number in the corner of a chart is not a page number - position
+    is what decides."""
     blocks = [
         {"page": 3, "block_id": 0, "type": "body", "text": "42",
          "font": "SomeSans", "font_size": 8.0,
          "bbox": [50.0, 400.0, 70.0, 410.0]},
-        {"page": 3, "block_id": 1, "type": "body", "text": "běžný text stránky",
+        {"page": 3, "block_id": 1, "type": "body", "text": "ordinary page text",
          "font": "SomeSans", "font_size": 8.0,
          "bbox": [50.0, 780.0, 300.0, 790.0]},
     ]
@@ -164,29 +169,27 @@ def test_position_strategy_ignores_a_number_in_the_middle_of_the_page():
 
 
 def test_a_long_run_of_roman_letters_is_not_a_page_number():
-    """Bez horní meze délky projde jako římská číslice každý dost dlouhý
-    shluk písmen I/V/X/L/C/D/M - a u detekce podle polohy se takový
-    řetězec reálně objeví."""
+    """Without an upper length bound, any long enough run of the letters
+    I/V/X/L/C/D/M passes as a Roman numeral - and under position-based
+    detection such a string really does turn up."""
     assert label_to_int("x" * 50) == (None, None)
 
 
-# --- sjednocení zápisu popisku --------------------------------------------
+# --- normalising how a label is written ------------------------------------
 
 def test_normalize_label_strips_leading_zeros():
-    """Reálný případ (MagPi): obsah čísla uvádí "032", běžící patička jen
-    "32". Bez sjednocení se článek nenamapuje na žádnou stránku, i když je
-    číslování detekované úplně bez chyby - a nespadne přitom nic."""
-    from magrag.build_page_map import normalize_label
+    """A real case (The MagPi): the contents give "032", the running
+    footer just "32". Without normalising, the article maps to no page
+    at all even though the numbering was detected flawlessly - and
+    nothing crashes in the process."""
     assert normalize_label("032") == "32"
     assert normalize_label("32") == "32"
 
 
 def test_normalize_label_uppercases_roman():
-    from magrag.build_page_map import normalize_label
     assert normalize_label("cxxxiii") == "CXXXIII"
 
 
 def test_normalize_label_leaves_unknown_shapes_alone():
-    """Co se nepodaří rozpoznat, se nesmí tiše zahodit."""
-    from magrag.build_page_map import normalize_label
+    """Whatever cannot be recognised must not be silently discarded."""
     assert normalize_label("A-12") == "A-12"

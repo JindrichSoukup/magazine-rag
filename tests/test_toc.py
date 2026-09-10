@@ -1,4 +1,4 @@
-"""Vytažení obsahu čísla ze stránky s obsahem."""
+"""Extracting an issue's contents from the contents page."""
 from magrag.create_toc import (
     TOC_MIN_ENTRIES,
     clean,
@@ -8,32 +8,33 @@ from magrag.create_toc import (
 )
 
 
-# --- čištění textu ---------------------------------------------------------
+# --- cleaning the text -----------------------------------------------------
 
 def test_control_characters_are_stripped():
-    """Ozdobná odrážka před položkou obsahu vyjde z PDF jako U+0007
-    (reálný případ: MagPi). V titulku nemá co dělat a rozbíjí porovnání
-    titulku z obsahu s nadpisem v těle čísla."""
+    """The decorative bullet before a contents entry comes out of the PDF
+    as U+0007 (a real case: The MagPi). It has no business in a title and
+    it breaks the comparison with the heading in the body of the issue."""
     assert clean("\x07CNC water cooling") == "CNC water cooling"
 
 
 def test_ordinary_whitespace_still_collapses():
-    assert clean("  dva   řádky\n textu ") == "dva řádky textu"
+    assert clean("  two   lines\n of text ") == "two lines of text"
 
 
 def test_strip_control_chars_keeps_accented_letters():
     assert strip_control_chars("Živa – čeština") == "Živa – čeština"
 
 
-# --- čísla stránek v obsahu ------------------------------------------------
+# --- page numbers in the contents ------------------------------------------
 
 def test_zero_padded_page_number_is_recognised():
     assert page_span_value("032") == "032"
 
 
 def test_abbreviated_range_yields_its_first_page():
-    """"XXXI–II" znamená XXXI až XXXII; pipeline dál potřebuje jen začátek,
-    konec článku se dopočítá z následujícího záznamu v obsahu."""
+    """"XXXI–II" means XXXI to XXXII; downstream the pipeline needs only
+    the start, since an article's end is derived from the next contents
+    record."""
     assert page_span_value("XXXI–II") == "XXXI"
     assert page_span_value("285-6") == "285"
 
@@ -42,11 +43,11 @@ def test_plain_words_are_not_page_numbers():
     assert page_span_value("Contents") is None
 
 
-# --- detekce stránek s obsahem --------------------------------------------
+# --- detecting the contents pages ------------------------------------------
 
 class FakeDoc:
-    """Dokument, u kterého si sami řekneme, kolik "začátků položky" je na
-    které stránce - detekce se testuje bez PDF."""
+    """A document where we simply declare how many "entry starts" each
+    page has, so detection can be tested without a PDF."""
 
     def __init__(self, scores):
         self.scores = scores
@@ -63,10 +64,11 @@ def _find(scores, monkeypatch):
 
 
 def test_toc_spanning_a_spread_is_found_whole(monkeypatch):
-    """Obsah bývá rozložený přes dvoustranu, u tlustšího čísla i přes tři
-    stránky proložené inzercí. Vzít jen tu nejlepší znamená přijít o dvě
-    třetiny čísla - a nepozná se to, protože zbytek pipeline poslušně
-    zpracuje to, co dostal."""
+    """The contents are usually spread over a double page, and in a
+    thicker issue across three pages separated by advertising. Taking
+    only the best one loses two thirds of the issue - and it does not
+    register, because the rest of the pipeline dutifully processes
+    whatever it was given."""
     assert _find([1, 0, 2, 0, 12, 20, 1, 13], monkeypatch) == (4, 5, 7)
 
 
@@ -75,31 +77,32 @@ def test_lone_stray_number_page_is_not_mistaken_for_the_toc(monkeypatch):
 
 
 def test_no_toc_at_all_returns_nothing(monkeypatch):
-    """Když obsah není nikde, je lepší nevrátit nic než ukázat na náhodnou
-    stránku - volající to pozná a může zafixovat --toc-page ručně."""
+    """When the contents are nowhere, returning nothing beats pointing at
+    a random page - the caller can tell, and can pin --toc-page by
+    hand."""
     assert _find([1, 2, 1, 0, 3, 0, 0, 2], monkeypatch) == ()
     assert TOC_MIN_ENTRIES > 3
 
 
-# --- odvození stylů položek ze stránky s obsahem ---------------------------
+# --- deriving entry styles from the contents page --------------------------
 
 def _span(text, font, size, color=0):
     return {"text": text, "font": font, "size": size, "color": color}
 
 
 def _entries(number_font, number_size, text_font, text_size, n, start=10):
-    """n položek obsahu vysázených zadaným stylem."""
+    """n contents entries set in the given style."""
     out = []
     for i in range(n):
         out.append(_span(str(start + i * 2), number_font, number_size))
-        out.append(_span(f"Titulek {i}", text_font, text_size))
+        out.append(_span(f"Title {i}", text_font, text_size))
     return out
 
 
 def test_two_equally_valid_number_styles_are_both_kept():
-    """Živa má v obsahu dvě velikosti čísel (9 a 10 b) a obě jsou pravé.
-    Vzít jen tu nejčastější znamená ztratit polovinu položek - což se při
-    vývoji taky stalo."""
+    """Živa uses two sizes of page number in its contents (9 and 10pt)
+    and both are real. Taking only the most frequent one loses half the
+    entries - which is exactly what happened during development."""
     from magrag.create_toc import detect_entry_styles
     spans = (_entries("MeliorCE-Bold", 9.0, "MeliorCE", 9.5, 19)
              + _entries("MeliorCE-Bold", 10.0, "MeliorCE", 10.0, 15, start=200))
@@ -109,11 +112,13 @@ def test_two_equally_valid_number_styles_are_both_kept():
 
 
 def test_decorative_callout_numbers_are_rejected():
-    """MagPi má na stránce s obsahem ozdobné upoutávky: velké bílé číslo
-    s kratším popiskem. Vypadají jako položka, ale vedou na jiný druh
-    textu a je jich řádově míň."""
+    """The MagPi's contents page carries decorative callouts: a large
+    white number with a short caption. They look like an entry, but they
+    lead into a different kind of text and there are far fewer of
+    them."""
     from magrag.create_toc import detect_entry_styles
-    spans = (_entries("RobotoSerif-20ptRegular", 8.5, "RobotoSerif-20ptRegular", 8.5, 32)
+    spans = (_entries("RobotoSerif-20ptRegular", 8.5,
+                      "RobotoSerif-20ptRegular", 8.5, 32)
              + _entries("Roboto-Bold", 12.0, "Roboto-Black", 12.0, 3, start=90))
     numbers, texts = detect_entry_styles(spans, profile=None)
     assert numbers == {("RobotoSerif", 8.5)}
@@ -121,8 +126,9 @@ def test_decorative_callout_numbers_are_rejected():
 
 
 def test_number_and_title_may_use_different_fonts():
-    """U MagPi 150 je číslo Rajdhani a titulek RobotoSlab - styl textu se
-    proto hledá zvlášť, ne jako 'stejná rodina jako číslo'."""
+    """In MagPi 150 the number is Rajdhani and the title RobotoSlab, so
+    the text style is sought separately rather than as "the same family
+    as the number"."""
     from magrag.create_toc import detect_entry_styles
     spans = _entries("Rajdhani-Bold", 14.0, "RobotoSlab-Light", 11.0, 22)
     numbers, texts = detect_entry_styles(spans, profile=None)
@@ -132,11 +138,12 @@ def test_number_and_title_may_use_different_fonts():
 
 def test_page_without_any_numbers_yields_no_styles():
     from magrag.create_toc import detect_entry_styles
-    spans = [_span("jen text", "Whatever", 10.0)]
+    spans = [_span("just text", "Whatever", 10.0)]
     assert detect_entry_styles(spans, profile=None) == (None, None)
 
 
 def test_page_number_survives_a_tab_and_a_decorative_glyph():
-    """U MagPi 150 přichází číslo položky slepené s tabulátorem a odrážkou
-    do jednoho spanu. Bez pročištění se položka ztratí beze stopy."""
+    """In MagPi 150 an entry's number arrives glued to a tab and a bullet
+    inside one span. Without cleaning, the entry is lost without a
+    trace."""
     assert page_span_value("10 \t \x07") == "10"
