@@ -12,7 +12,9 @@ Rather than returning the individual, short chunks separately:
   4. The other articles (one or two hits) get "window expansion": each
      hit is padded with WINDOW neighbouring chunks either side, by
      chunk_index within the same article, and overlapping windows are
-     merged into one piece.
+     merged into one piece. A hit on a figure-caption chunk gets the
+     body chunks on the caption's pages instead, with the caption text
+     itself appended; a promoted article gets its captions appended too.
   5. Every resulting piece of context carries a citation (magazine,
      year, issue, article, authors, pages) so the LLM can attribute what
      it says.
@@ -103,9 +105,38 @@ def merge_spans(spans):
     return merged
 
 
+def caption_span(meta, seq, window):
+    """The body window for a caption hit: (lo, hi) chunk indices, or None
+    when no body chunk shares a page with the caption.
+
+    A caption chunk is a bundle of the article's consecutive captions,
+    not one caption, and often spans several pages. On the Živa archive
+    its pages hold 6 body chunks in the median and 14 or more in one case
+    in ten - more than a body hit ever gets. So the window is capped at
+    the size a body hit gets (2 * window + 1 chunks), taken from the
+    middle of the chunks on the caption's pages.
+    """
+    on_pages = [idx for idx, ps, pe, _ in seq
+                if ps <= meta["page_end"] and pe >= meta["page_start"]]
+    if not on_pages:
+        return None
+    mid = on_pages[len(on_pages) // 2]
+    return max(on_pages[0], mid - window), min(on_pages[-1], mid + window)
+
+
 def format_citation(meta, profile, page_start=None, page_end=None):
     """Render one source citation. The wording and its language come from
-    the profile, because they follow the corpus rather than the code."""
+    the profile, because they follow the corpus rather than the code.
+
+    The page numbers are PDF pages (1 = the first page of the PDF), NOT
+    the numbers printed in the magazine: chunks only know which PDF page
+    they came from. They find the text in the PDF file, not in a printed
+    copy (Živa numbers its pages across the whole volume, so PDF page 4
+    may be printed page 262). The profiles' page labels say "PDF" so that
+    neither the LLM nor the reader mistakes one for the other. For a
+    promoted whole article the range is the article's pdf_page_start and
+    pdf_page_end, which can include a cover page that chunking skipped.
+    """
     ps = page_start if page_start is not None else meta["page_start"]
     pe = page_end if page_end is not None else meta["page_end"]
     pages = (profile.page_single_label.format(page=ps) if ps == pe
@@ -136,33 +167,67 @@ def assemble_context(hits, corpus_index, body_sequences, profile,
         best_dist = min(h["distance"] for h in article_hits)
 
         if len(article_hits) >= promote_threshold:
-            # PROMOTED: the whole article from the corpus, not its chunks
+            # PROMOTED: the whole article from the corpus, not its chunks.
+            # full_text holds the body only, so the captions are appended:
+            # they often carry facts (species, place, year) the body does
+            # not, and may be exactly why the article was found.
             article = corpus_index.get(article_id)
             if article is None:
                 continue  # should not happen, but better not to crash
+            text = article["full_text"]
+            if article.get("captions_text"):
+                text += f"\n\n{profile.captions_label}\n\n{article['captions_text']}"
             blocks.append({
                 "mode": "full_article",
                 "n_hits": len(article_hits),
                 "citation": format_citation(
                     meta0, profile,
                     article["pdf_page_start"], article["pdf_page_end"]),
-                "text": article["full_text"],
+                "text": text,
                 "best_distance": best_dist,
             })
             continue
 
-        # NOT PROMOTED: window expansion around each hit, overlaps merged
-        spans = [(h["meta"]["chunk_index"] - window,
-                  h["meta"]["chunk_index"] + window,
-                  h["distance"]) for h in article_hits]
+        # NOT PROMOTED: window expansion around each hit, overlaps merged.
+        # A body hit is padded by chunk_index. A caption hit cannot be:
+        # captions have their own numbering, so caption-0 has nothing to do
+        # with body chunk 0. It gets the body chunks on its own pages
+        # instead (see caption_span), and its own text is attached to the
+        # window it ends up in.
         seq = body_sequences.get(article_id, [])
-        for lo, hi, dist in merge_spans(spans):
-            pieces = [(idx, ps, pe, t) for idx, ps, pe, t in seq if lo <= idx <= hi]
-            if not pieces:
+        spans = []
+        captions = []  # (span or None, hit)
+        for h in article_hits:
+            if h["meta"]["chunk_type"] == "caption":
+                span = caption_span(h["meta"], seq, window)
+                captions.append((span, h))
+                if span is not None:
+                    spans.append((*span, h["distance"]))
+            else:
+                spans.append((h["meta"]["chunk_index"] - window,
+                              h["meta"]["chunk_index"] + window,
+                              h["distance"]))
+        # A caption with no body text on its pages (a photo spread) still
+        # goes in, as a window of its own with no body chunks
+        windows = [(lo, hi, dist, [h for span, h in captions
+                                   if span and lo <= span[0] and span[1] <= hi])
+                   for lo, hi, dist in merge_spans(spans)]
+        windows += [(None, None, h["distance"], [h])
+                    for span, h in captions if span is None]
+        for lo, hi, dist, own in windows:
+            pieces = ([] if lo is None else
+                      [(idx, ps, pe, t) for idx, ps, pe, t in seq if lo <= idx <= hi])
+            if not pieces and not own:
                 continue
-            text = "\n\n".join(t for _, _, _, t in pieces)
-            page_start = min(ps for _, ps, _, _ in pieces)
-            page_end = max(pe for _, _, pe, _ in pieces)
+            texts = [t for _, _, _, t in pieces]
+            if own:
+                texts.append(profile.captions_label)
+                texts.extend(h["text"] for h in own)
+            text = "\n\n".join(texts)
+            pages = [(ps, pe) for _, ps, pe, _ in pieces] + \
+                [(h["meta"]["page_start"], h["meta"]["page_end"]) for h in own]
+            page_start = min(ps for ps, _ in pages)
+            page_end = max(pe for _, pe in pages)
             blocks.append({
                 "mode": "window",
                 "n_hits": len(article_hits),

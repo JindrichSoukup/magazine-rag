@@ -216,10 +216,16 @@ class SourceProfile:
     # The citation printed above each block of retrieved context, and
     # handed to the LLM so it can attribute what it says. Like the chunk
     # header, its language follows the corpus rather than the code.
+    # The pages are PDF pages, not printed page numbers (see
+    # assemble_context.format_citation), so the labels say so.
     citation_template: str = (
         "{title} ({journal} {year}/{issue}, {pages}), authors: {author}")
-    page_single_label: str = "p. {page}"
-    page_range_label: str = "pp. {start}-{end}"
+    page_single_label: str = "PDF p. {page}"
+    page_range_label: str = "PDF pp. {start}-{end}"
+    # Heading of the figure captions appended to a context block (the
+    # body text and the captions are kept apart until then, see
+    # assemble_context).
+    captions_label: str = "Figure captions:"
 
     system_prompt_file: str = ""
 

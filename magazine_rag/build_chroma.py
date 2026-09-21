@@ -50,11 +50,15 @@ def sanitize_metadata(chunk: dict) -> dict:
     year and issue are deliberately converted to int (the source data
     keeps them as strings) so that they can later be filtered
     numerically, e.g. {"year": {"$gt": 2020}}.
+
+    A magazine without years (The MagPi numbers its issues continuously)
+    has year == "". Chroma rejects None, so the key is left out rather
+    than filled with a fake value; a year filter then simply does not
+    match those chunks.
     """
-    return {
+    meta = {
         "chunk_type": chunk["chunk_type"],
         "chunk_index": chunk["chunk_index"],
-        "year": int(chunk["year"]),
         "issue": int(chunk["issue"]),
         "article_id": chunk["article_id"],
         "title": chunk["title"] or "",
@@ -62,6 +66,9 @@ def sanitize_metadata(chunk: dict) -> dict:
         "page_start": chunk["page_start"],
         "page_end": chunk["page_end"],
     }
+    if chunk["year"]:
+        meta["year"] = int(chunk["year"])
+    return meta
 
 
 def main():

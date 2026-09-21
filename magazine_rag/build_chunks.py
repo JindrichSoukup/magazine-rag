@@ -71,6 +71,10 @@ def filter_cover_pages(paragraphs, total_pdf_pages, skip_first, skip_last):
     way to the final PDF page, because nothing follows it in the
     contents - and that final page is usually a standalone cover photo
     with no relation to the article.
+
+    total_pdf_pages is the last page with text, not the true page count
+    (see the note where assign_articles computes it), so with a
+    picture-only back cover the last pages dropped are real content.
     """
     if not paragraphs or not total_pdf_pages:
         return paragraphs
@@ -159,7 +163,12 @@ def chunk_paragraphs(paragraphs, target_chars=TARGET_CHARS,
         last = _finalize_chunk(current)
         if chunks and len(last["text"]) < MIN_CHUNK_CHARS:
             # a short remainder, typically just the overlap, is better
-            # appended to the previous chunk than left standing alone
+            # appended to the previous chunk than left standing alone.
+            # Known and accepted: the remainder starts with the overlap
+            # paragraphs, which are already at the end of chunks[-1], so
+            # the last chunk of a longer article carries them twice. It
+            # only adds a little noise to that chunk's embedding and to
+            # the LLM context; nothing is lost.
             chunks[-1]["text"] += "\n\n" + last["text"]
             chunks[-1]["page_end"] = last["page_end"]
         else:

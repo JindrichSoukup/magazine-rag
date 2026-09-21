@@ -109,8 +109,10 @@ PROFILE = SourceProfile(
     unknown_author_label="neuvedeno",
     citation_template=(
         "{title} ({journal} {year}/{issue}, {pages}), autoři: {author}"),
-    page_single_label="str. {page}",
-    page_range_label="str. {start}-{end}",
+    # PDF pages, not the printed ones (see the base profile)
+    page_single_label="str. {page} v PDF",
+    page_range_label="str. {start}-{end} v PDF",
+    captions_label="Popisky obrázků:",
 
     system_prompt_file="ziva_cs.txt",
 )

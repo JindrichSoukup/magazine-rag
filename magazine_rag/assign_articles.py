@@ -283,6 +283,7 @@ def find_heading_positions(ordered_blocks, entries):
         return heading_idxs
 
     positions = []
+    scores = []  # how well each entry matched the heading it landed on
     search_from = 0
     for entry in entries:
         title_text = entry["title"].strip()
@@ -292,6 +293,35 @@ def find_heading_positions(ordered_blocks, entries):
             if b["type"] in ("title", "heading") and texts_match(title_text, b["text"]):
                 found = idx
                 break
+        score = (longest_common_substring_len(
+                     normalize_for_match(title_text),
+                     normalize_for_match(ordered_blocks[found]["text"]))
+                 if found is not None else 0)
+        prev = next((k for k in range(len(positions) - 1, -1, -1)
+                     if positions[k] is not None), None)
+        if (found is not None and prev is not None
+                and positions[prev] == found and scores[prev] >= score):
+            # Two entries on the SAME heading, and the earlier one matches
+            # it at least as well: one heading covering both, e.g. a single
+            # review of two books (2017/6, "Marine Mammals ... a ...
+            # Cetacean Paleobiology"). The heading and its text stay with
+            # the earlier entry, and this one is absorbed into it by the
+            # caller (absorbed_unmatched_siblings) rather than stealing
+            # the text and leaving the earlier one empty.
+            #
+            # When THIS entry matches better, both keep the heading's
+            # position: the earlier entry then gets the text before the
+            # heading and this one the heading onwards. That is right when
+            # the earlier entry only matched through shared words and its
+            # real text has no heading of its own (2020/6: "Knihy
+            # Nakladatelství Academia" vs the heading "Ceny Nakladatelství
+            # Academia za rok 2019 ...", with the book list above it).
+            print(f"  [info] {title_text!r} shares a heading with "
+                  f"{entries[prev]['title']!r}, which matches it better - "
+                  f"treating them as one article")
+            positions.append(None)
+            scores.append(0)
+            continue
         if found is None:
             print(f"  [warn] no heading of its own found for {title_text!r} "
                   f"in a combined contents record ({len(heading_idxs)} "
@@ -300,8 +330,12 @@ def find_heading_positions(ordered_blocks, entries):
                   f"its text probably stayed with a neighbouring entry - "
                   f"check by hand")
         else:
+            # Deliberately `found`, not `found + 1`: the next entry may
+            # land on the same heading, and the check above decides who
+            # gets it.
             search_from = found
         positions.append(found)  # None, or an index
+        scores.append(score)
     return positions
 
 
@@ -384,6 +418,13 @@ def assemble_articles(blocks, toc, label_to_page, profile, year=None, issue=None
     # 3) the end of the page range is computed PER GROUP, not per entry:
     #    the whole group ends where the NEXT group (a different page)
     #    begins ------------------------------------------------------------
+    # Known limitation: this is the last page with any TEXT, not the page
+    # count of the PDF. When the issue ends with pages that are only
+    # pictures (a back cover photo), it comes out lower than the real
+    # count, and build_chunks.filter_cover_pages (skip_last) then drops
+    # the last pages of real content instead of the cover. Left as is
+    # for now; the fix would be to carry the PDF's page count from
+    # extract_blocks.
     last_pdf_page = max(b["page"] for b in blocks)
     for gi, group in enumerate(groups):
         end = (groups[gi + 1][0]["pdf_page_start"] - 1
@@ -532,7 +573,12 @@ def assemble_articles(blocks, toc, label_to_page, profile, year=None, issue=None
             print(f"  [warn] article {entry['title']!r} has no blocks left "
                   f"after splitting the boundary pages - check by hand")
 
-        article_id = f"{year}-{issue}-{art_idx}" if year and issue else str(art_idx)
+        # The id must be unique across the whole archive, not just the
+        # issue, so it carries whatever identifies the issue: year and
+        # issue for Živa ("2014-6-3"), just the issue for The MagPi, which
+        # numbers its issues continuously and has no year ("150-3").
+        article_id = "-".join(str(p) for p in (year, issue, art_idx)
+                              if p not in (None, ""))
         full_text, full_text_paragraphs = build_full_text_and_paragraphs(chunks)
         captions_text, captions_paragraphs = build_captions_text_and_paragraphs(chunks)
         articles.append({

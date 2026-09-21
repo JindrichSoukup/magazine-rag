@@ -53,9 +53,12 @@ def run_query(coll, model_name, query_text, top_k, year=None, chunk_type=None):
     for i, (doc, meta, dist, cid) in enumerate(zip(
             result["documents"][0], result["metadatas"][0],
             result["distances"][0], result["ids"][0]), 1):
+        # No year for a magazine that numbers its issues continuously
+        issue = (f"{meta['year']}/{meta['issue']}" if "year" in meta
+                 else meta["issue"])
         print(f"{i}. [cosine distance {dist:.3f}, lower = more similar] "
-              f"{meta['title']} ({meta['year']}/{meta['issue']}, "
-              f"pp. {meta['page_start']}-{meta['page_end']})")
+              f"{meta['title']} ({issue}, "
+              f"PDF pp. {meta['page_start']}-{meta['page_end']})")
         print(f"   authors: {meta['author'] or 'unknown'} | "
               f"type: {meta['chunk_type']} | id: {cid}")
         print(f"   {doc[:200]}...")

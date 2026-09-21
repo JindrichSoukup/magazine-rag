@@ -85,7 +85,9 @@ def build_prompt(question: str, blocks) -> str:
 def stream_answer(client, prompt: str, system_prompt: str, model: str,
                   max_tokens: int) -> str:
     """Stream the answer to stdout and return it whole as a string."""
-    with client.messages.stream(
+    # client.beta, not client.messages: only the beta resource accepts
+    # betas= and fallbacks= (the plain one raises TypeError on them).
+    with client.beta.messages.stream(
         model=model,
         max_tokens=max_tokens,
         system=system_prompt,

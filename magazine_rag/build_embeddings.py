@@ -68,13 +68,17 @@ def paths_for(out_dir: Path, model_name: str, prefix: str = "embeddings"):
     directory; the model name is in the filename so that several
     candidates can be compared without deleting anything (see
     tools/compare_models.py).
+
+    Suffixes are appended to the string, never set with with_suffix():
+    a model name may contain a dot ("nomic-embed-text-v1.5"), and
+    with_suffix() would replace the ".5" instead of adding to it.
     """
     slug = model_name.replace("/", "__")
     base = out_dir / f"{prefix}__{slug}"
     return {
-        "npy": base.with_suffix(".npy"),
+        "npy": Path(f"{base}.npy"),
         "ids": Path(f"{base}_ids.json"),
-        "raw": base.with_suffix(".raw"),
+        "raw": Path(f"{base}.raw"),
         "progress": Path(f"{base}_progress.json"),
     }
 
