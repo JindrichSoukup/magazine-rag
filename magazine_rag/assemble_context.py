@@ -31,11 +31,12 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-import chromadb
-
 from magazine_rag import profiles
 from magazine_rag.console import setup_console
-from magazine_rag.embed import embed
+
+# chromadb and the embedding model (torch) are imported where they are
+# used, not here: assembling the context from hits needs neither, and the
+# tests of it run in CI, which installs PyMuPDF only.
 
 try:
     import tiktoken
@@ -241,6 +242,7 @@ def assemble_context(hits, corpus_index, body_sequences, profile,
 
 
 def run_search(coll, model_name, query_text, top_n):
+    from magazine_rag.embed import embed
     query_vector = embed([query_text], model_name=model_name, is_query=True,
                          show_progress=False)[0]
     result = coll.query(query_embeddings=[query_vector.tolist()], n_results=top_n)
@@ -283,6 +285,9 @@ def main():
     corpus = json.loads(Path(args.corpus).read_text(encoding="utf-8"))
     body_sequences = build_body_sequences(chunks)
     corpus_index = build_corpus_index(corpus)
+
+    import chromadb
+    from magazine_rag.embed import embed
 
     client = chromadb.PersistentClient(path=args.db_dir)
     coll = client.get_collection(args.collection)
